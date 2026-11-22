@@ -59,6 +59,40 @@ describe('MV3 browser-extension coordinator, sender security, 103-voice catalog,
     assert.equal(values.has('af_maple'), true);
     assert.equal(values.has('zm_013'), true);
     assert.equal(values.has('zm_100'), true);
+    const chineseOptions = buildKokoroVoiceSelectOptions(KOKORO_SPEAKERS_103, 'zh-CN');
+    assert.deepEqual(chineseOptions.map((option) => option.value), options.map((option) => option.value));
+    assert.equal(chineseOptions.find((option) => option.value === 'af_maple')?.label, 'af_maple · 美式英语女声');
+  });
+
+  it('packages both locale catalogs with every manifest and Side Panel label', () => {
+    const distDir = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'dist');
+    const manifest = readFileSync(join(distDir, 'manifest.json'), 'utf8');
+    const panel = readFileSync(join(distDir, 'sidepanel.html'), 'utf8');
+    const manifestKeys = [...manifest.matchAll(/__MSG_(\w+)__/g)].map((match) => match[1]!);
+    const panelKeys = [...panel.matchAll(/data-i18n(?:-placeholder)?="(\w+)"/g)].map((match) => match[1]!);
+    const readLocale = (locale: string) => JSON.parse(
+      readFileSync(join(distDir, '_locales', locale, 'messages.json'), 'utf8'),
+    ) as Record<string, { message: string; placeholders?: Record<string, { content: string }> }>;
+    const english = readLocale('en');
+    const chinese = readLocale('zh_CN');
+
+    assert.match(manifest, /"default_locale":\s*"en"/);
+    assert.deepEqual(manifestKeys.sort(), ['actionTitle', 'extensionDescription', 'extensionName']);
+    assert.ok(panelKeys.includes('saveButton'));
+    for (const key of [...manifestKeys, ...panelKeys]) {
+      assert.ok(english[key], `Missing message ${key}`);
+    }
+    assert.deepEqual(Object.keys(chinese).sort(), Object.keys(english).sort());
+    for (const catalog of [english, chinese]) {
+      for (const [key, entry] of Object.entries(catalog)) {
+        assert.ok(entry.message.trim(), `Empty message ${key}`);
+        const used = [...new Set([...entry.message.matchAll(/\$(\w+)\$/g)].map((match) => match[1]!))];
+        assert.deepEqual(used.sort(), Object.keys(entry.placeholders ?? {}).sort(), key);
+      }
+    }
+    for (const [key, entry] of Object.entries(english)) {
+      assert.deepEqual(chinese[key]?.placeholders, entry.placeholders, key);
+    }
   });
 
   it('rejects untrusted content-script or cross-extension senders in MV3 service worker router', async () => {

@@ -31,6 +31,7 @@ import {
   type TtsSynthOptions,
   type TtsSynthResult,
 } from '@voice-mode/core';
+import { message } from './i18n.ts';
 
 export const SPEECH_SYNTHESIS_MIME = 'text/x-speech-synthesis-utf8';
 export const DEFAULT_EXTENSION_PROBE_TIMEOUT_MS = 500;
@@ -43,14 +44,23 @@ export interface VoiceSelectOption {
   label: string;
 }
 
+const ZH_MALE_STYLES: Readonly<Record<string, string>> = {
+  deep: '低沉男声',
+  rich: '浑厚男声',
+  clear: '清亮男声',
+  magnetic: '磁性男声',
+};
+
 /**
  * Build dynamic `<select>` options for all 103 Kokoro voices (`health.voices`),
  * ordering curated defaults & popular voices first while keeping all 103 voices selectable.
  */
 export function buildKokoroVoiceSelectOptions(
   voices: readonly string[] = KOKORO_SPEAKERS_103,
+  language: 'en' | 'zh-CN' = 'en',
 ): VoiceSelectOption[] {
   const source = voices.length > 0 ? voices : KOKORO_SPEAKERS_103;
+  const chinese = language === 'zh-CN';
   const sidByName = new Map<string, number>();
   KOKORO_SPEAKERS_103.forEach((id, sid) => sidByName.set(id.toLowerCase(), sid));
 
@@ -61,11 +71,14 @@ export function buildKokoroVoiceSelectOptions(
     const maleStyle = KOKORO_POPULAR_MALE[sid];
     const hz = KOKORO_F0[sid];
     const parts = [voiceId];
-    if (named) parts.push(`${named.en}/${named.zh}`);
-    if (maleStyle) parts.push(`${maleStyle} male`);
-    else if (voiceId.startsWith('af_')) parts.push('EN-US female');
-    else if (voiceId.startsWith('bf_')) parts.push('EN-GB');
-    else if (typeof hz === 'number') parts.push(`${hz < 180 ? 'male' : 'female'} ${hz}Hz`);
+    if (named) parts.push(chinese ? named.zh : `${named.en}/${named.zh}`);
+    if (maleStyle) parts.push(chinese ? (ZH_MALE_STYLES[maleStyle] ?? '男声') : `${maleStyle} male`);
+    else if (voiceId.startsWith('af_')) parts.push(chinese ? '美式英语女声' : 'EN-US female');
+    else if (voiceId.startsWith('bf_')) parts.push(chinese ? '英式英语' : 'EN-GB');
+    else if (typeof hz === 'number') {
+      if (chinese) parts.push(`${hz < 180 ? '男声' : '女声'} ${hz} Hz`);
+      else parts.push(`${hz < 180 ? 'male' : 'female'} ${hz}Hz`);
+    }
     return parts.join(' · ');
   };
 
@@ -284,23 +297,27 @@ class BrowserSpeechFallbackTts implements TtsEngine {
   }
 }
 
+function unavailableAsrError(): Error {
+  return new Error(
+    message(
+      'asrFallbackUnavailable',
+      undefined,
+      'Local voice-daemon is offline; configure BYOK ASR in Side Panel or use browser SpeechRecognition dictation.',
+    ),
+  );
+}
+
 class UnconfiguredFallbackAsr implements AsrTransport {
   readonly kind = 'openai-compat' as const;
   async start(): Promise<void> {
-    throw new Error(
-      'Local voice-daemon is offline; configure BYOK ASR in Side Panel or use browser SpeechRecognition dictation.',
-    );
+    throw unavailableAsrError();
   }
   pushAudio(): void {}
   async finalize(): Promise<never> {
-    throw new Error(
-      'Local voice-daemon is offline; configure BYOK ASR in Side Panel or use browser SpeechRecognition dictation.',
-    );
+    throw unavailableAsrError();
   }
   async transcribe(): Promise<never> {
-    throw new Error(
-      'Local voice-daemon is offline; configure BYOK ASR in Side Panel or use browser SpeechRecognition dictation.',
-    );
+    throw unavailableAsrError();
   }
   abort(): void {}
   async close(): Promise<void> {}
@@ -543,7 +560,11 @@ export class VoiceExtensionCoordinator {
     const Ctor = opts.SpeechRecognitionCtor ?? g.SpeechRecognition ?? g.webkitSpeechRecognition;
     if (!Ctor) {
       throw new Error(
-        'Browser SpeechRecognition is unavailable; start local voice-daemon or configure BYOK ASR.',
+        message(
+          'browserAsrUnavailable',
+          undefined,
+          'Browser SpeechRecognition is unavailable; start local voice-daemon or configure BYOK ASR.',
+        ),
       );
     }
 
@@ -569,14 +590,24 @@ export class VoiceExtensionCoordinator {
       }
     };
     recognition.onerror = (ev) => {
-      opts.onError?.(new Error(`Browser SpeechRecognition error: ${ev.error ?? 'unknown'}`));
+      const details = ev.error ?? 'unknown';
+      const fallback = `Browser SpeechRecognition error: ${details}`;
+      let errorMessage = message('browserAsrError', [details], fallback);
+      if (details === 'not-allowed' || details === 'service-not-allowed') {
+        errorMessage = message('browserAsrNotAllowed', undefined, errorMessage);
+      } else if (details === 'audio-capture') {
+        errorMessage = message('browserAsrNoCapture', undefined, errorMessage);
+      } else if (details === 'no-speech') {
+        errorMessage = message('browserAsrNoSpeech', undefined, errorMessage);
+      }
+      opts.onError?.(new Error(errorMessage));
     };
     recognition.onend = () => {
       opts.onStateChange?.(false);
     };
 
-    opts.onStateChange?.(true);
     recognition.start();
+    opts.onStateChange?.(true);
 
     return {
       stop() {

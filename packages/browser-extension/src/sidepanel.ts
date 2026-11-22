@@ -10,6 +10,7 @@ import {
   VoiceExtensionCoordinator,
   buildKokoroVoiceSelectOptions,
 } from './coordinator.js';
+import { message } from './i18n.ts';
 
 interface StoredSettings {
   daemonBaseUrl?: string;
@@ -43,6 +44,15 @@ const readInput = document.getElementById('read-input') as HTMLTextAreaElement;
 const dictationPreview = document.getElementById('dictation-preview') as HTMLTextAreaElement;
 const statusLog = document.getElementById('status-log') as HTMLElement;
 const micBtn = document.getElementById('mic-btn') as HTMLButtonElement;
+const language = message('documentLanguage') === 'zh-CN' ? 'zh-CN' : 'en';
+
+document.documentElement.lang = language;
+for (const element of document.querySelectorAll<HTMLElement>('[data-i18n]')) {
+  element.textContent = message(element.dataset.i18n!);
+}
+for (const element of document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('[data-i18n-placeholder]')) {
+  element.placeholder = message(element.dataset.i18nPlaceholder!);
+}
 
 let currentReplacements: AsrReplacement[] = [
   { from: ['deep seek'], to: 'DeepSeek' },
@@ -56,6 +66,12 @@ function setStatus(message: string): void {
   statusLog.textContent = redactSecrets(message);
 }
 
+function run(action: () => Promise<unknown>): void {
+  void action().catch((error: unknown) => {
+    setStatus(message('actionError', [error instanceof Error ? error.message : String(error)]));
+  });
+}
+
 function setBadge(state: 'checking' | 'ready' | 'fallback', text: string): void {
   badgeEl.dataset.state = state;
   badgeEl.textContent = text;
@@ -63,7 +79,7 @@ function setBadge(state: 'checking' | 'ready' | 'fallback', text: string): void 
 
 function populateVoiceDropdown(voices: readonly string[], preferredVoice?: string): void {
   const previous = preferredVoice ?? voiceSelect.value ?? 'zf_001';
-  const options = buildKokoroVoiceSelectOptions(voices);
+  const options = buildKokoroVoiceSelectOptions(voices, language);
   voiceSelect.replaceChildren();
   for (const opt of options) {
     const el = document.createElement('option');
@@ -85,10 +101,10 @@ const coordinator = new VoiceExtensionCoordinator({
   replacements: currentReplacements,
   onFallback: (surface, reason) => {
     daemonHealthy = false;
-    setBadge('fallback', 'Fallback (<1s)');
-    setStatus(`Fallback (${surface}): ${reason}`);
+    setBadge('fallback', message('fallbackBadge'));
+    setStatus(message('fallbackStatus', [message(`${surface}Surface`), reason]));
   },
-  onError: (msg) => setStatus(`Error: ${msg}`),
+  onError: (msg) => setStatus(message('actionError', [msg])),
 });
 
 async function loadSettingsAndProbe(): Promise<DaemonHealthResult> {
@@ -139,24 +155,21 @@ async function loadSettingsAndProbe(): Promise<DaemonHealthResult> {
           },
         }
       : {}),
-    onFallback: (surface, reason) => {
-      daemonHealthy = false;
-      setBadge('fallback', 'Fallback (<1s)');
-      setStatus(`Fallback (${surface}): ${reason}`);
-    },
-    onError: (msg) => setStatus(`Error: ${msg}`),
   });
 
   const health = await coordinator.probeHealth();
   daemonHealthy = health.ok;
   if (health.ok) {
     populateVoiceDropdown(health.voices, stored.voice ?? voiceSelect.value);
-    setBadge('ready', `Daemon v${health.version} (${health.voices.length} voices)`);
-    setStatus('Connected to local voice-daemon.');
+    setBadge('ready', message('daemonReadyBadge', [health.version, String(health.voices.length)]));
+    setStatus(message('daemonConnected'));
   } else {
     populateVoiceDropdown(KOKORO_SPEAKERS_103, stored.voice ?? voiceSelect.value);
-    setBadge('fallback', hasByok ? 'BYOK Cloud Fallback (<1s)' : 'Browser Fallback (<1s)');
-    setStatus(`Daemon unavailable (${health.error ?? 'offline'}); using <1s fallback.`);
+    setBadge('fallback', message(hasByok ? 'cloudFallbackBadge' : 'browserFallbackBadge'));
+    const errorKey = health.status === 401
+      ? 'daemonUnauthorized'
+      : health.status === 403 ? 'daemonForbidden' : 'daemonUnavailable';
+    setStatus(message(errorKey));
   }
   return health;
 }
@@ -177,125 +190,121 @@ async function saveCurrentSettings(): Promise<DaemonHealthResult> {
 }
 
 document.getElementById('save-btn')?.addEventListener('click', () => {
-  void saveCurrentSettings();
+  run(saveCurrentSettings);
 });
 
 voiceSelect?.addEventListener('change', () => {
-  void saveCurrentSettings();
+  run(saveCurrentSettings);
 });
 
 document.getElementById('grant-site-btn')?.addEventListener('click', () => {
-  void (async () => {
+  run(async () => {
     const granted = await chrome.permissions.request({
       permissions: ['scripting'],
       origins: OPTIONAL_CHAT_ORIGINS,
     });
-    setStatus(
-      granted
-        ? 'Granted on-demand access for DeepSeek, Gemini, and Kimi.'
-        : 'Site access request was declined.',
-    );
-  })();
+    setStatus(message(granted ? 'siteAccessGranted' : 'siteAccessDeclined'));
+  });
 });
 
 document.getElementById('read-page-btn')?.addEventListener('click', () => {
-  void (async () => {
+  run(async () => {
     const reply = (await chrome.runtime.sendMessage({ type: 'VM_READ_ACTIVE_TAB' })) as
       | { ok?: boolean; text?: string; error?: string }
       | undefined;
     if (!reply?.ok || !reply.text) {
-      setStatus(reply?.error ?? 'No selected text or assistant reply found on active tab.');
+      setStatus(reply?.error ?? message('noReadableText'));
       return;
     }
     readInput.value = reply.text;
     const sentences = await coordinator.readMarkdownAloud(reply.text);
-    setStatus(`Reading ${sentences.length} sentence(s)...`);
-  })();
+    setStatus(message('reading', [String(sentences.length)]));
+  });
 });
 
 document.getElementById('speak-text-btn')?.addEventListener('click', () => {
-  void (async () => {
+  run(async () => {
     const text = readInput.value.trim();
     if (!text) return;
     const sentences = await coordinator.readMarkdownAloud(text);
-    setStatus(`Speaking ${sentences.length} sentence(s)...`);
-  })();
+    setStatus(message('speaking', [String(sentences.length)]));
+  });
 });
 
 document.getElementById('stop-btn')?.addEventListener('click', () => {
   coordinator.stopPlayback();
-  setStatus('Playback stopped.');
+  setStatus(message('playbackStopped'));
 });
 
 micBtn?.addEventListener('click', () => {
-  void (async () => {
+  run(async () => {
     if (webSpeechHandle) {
       webSpeechHandle.stop();
       webSpeechHandle = null;
-      micBtn.textContent = 'Start Mic';
+      micBtn.textContent = message('startMicButton');
       return;
     }
     if (dictationSession && dictationSession.state !== 'idle') {
       await dictationSession.stop();
-      micBtn.textContent = 'Start Mic';
+      micBtn.textContent = message('startMicButton');
       return;
     }
 
     if (!daemonHealthy && !coordinator.hasConfiguredByokAsr()) {
-      try {
-        webSpeechHandle = coordinator.startWebSpeechFallbackDictation({
-          replacements: currentReplacements,
-          onStateChange: (active) => {
-            micBtn.textContent = active ? 'Stop Mic' : 'Start Mic';
-            if (!active) webSpeechHandle = null;
-            setStatus(active ? 'Listening via browser SpeechRecognition fallback...' : 'Mic idle.');
-          },
-          onFinalTranscript: (text) => {
-            dictationPreview.value = text;
-            void chrome.runtime.sendMessage({
-              type: 'VM_INJECT_ACTIVE_TAB',
-              text,
-              replacements: currentReplacements,
-            });
-          },
-          onError: (err) => setStatus(err.message),
-        });
-      } catch (err) {
-        setStatus(err instanceof Error ? err.message : String(err));
-      }
+      let recognitionFailed = false;
+      webSpeechHandle = coordinator.startWebSpeechFallbackDictation({
+        replacements: currentReplacements,
+        onStateChange: (active) => {
+          micBtn.textContent = message(active ? 'stopMicButton' : 'startMicButton');
+          if (!active) webSpeechHandle = null;
+          if (!recognitionFailed) {
+            setStatus(message(active ? 'browserListening' : 'micState_idle'));
+          }
+        },
+        onFinalTranscript: previewAndInsertDictation,
+        onError: (err) => {
+          recognitionFailed = true;
+          setStatus(err.message);
+        },
+      });
       return;
     }
 
     dictationSession = coordinator.createDictationSession({
       onStateChange: (st) => {
-        micBtn.textContent = st === 'idle' ? 'Start Mic' : 'Stop Mic';
-        setStatus(`Mic state: ${st}`);
+        micBtn.textContent = message(st === 'idle' ? 'startMicButton' : 'stopMicButton');
+        setStatus(message(`micState_${st}`));
       },
-      onFinalTranscript: (text) => {
-        dictationPreview.value = text;
-        void chrome.runtime.sendMessage({
-          type: 'VM_INJECT_ACTIVE_TAB',
-          text,
-          replacements: currentReplacements,
-        });
-      },
-      onError: (err) => setStatus(`Mic error: ${err.message}`),
+      onFinalTranscript: previewAndInsertDictation,
+      onError: (err) => setStatus(message('micError', [err.message])),
     });
     await dictationSession.start('toggle');
-  })();
+  });
 });
+
+async function insertIntoActiveTab(text: string): Promise<{ ok?: boolean; error?: string } | undefined> {
+  return (await chrome.runtime.sendMessage({
+    type: 'VM_INJECT_ACTIVE_TAB',
+    text,
+    replacements: currentReplacements,
+  })) as { ok?: boolean; error?: string } | undefined;
+}
+
+function previewAndInsertDictation(text: string): void {
+  dictationPreview.value = text;
+  run(async () => {
+    const reply = await insertIntoActiveTab(text);
+    if (!reply?.ok) setStatus(reply?.error ?? message('noFocusedInput'));
+  });
+}
 
 document.getElementById('inject-btn')?.addEventListener('click', () => {
-  void (async () => {
+  run(async () => {
     const text = dictationPreview.value.trim();
     if (!text) return;
-    const reply = (await chrome.runtime.sendMessage({
-      type: 'VM_INJECT_ACTIVE_TAB',
-      text,
-      replacements: currentReplacements,
-    })) as { ok?: boolean; error?: string } | undefined;
-    setStatus(reply?.ok ? 'Injected into focused input.' : (reply?.error ?? 'No focused input.'));
-  })();
+    const reply = await insertIntoActiveTab(text);
+    setStatus(reply?.ok ? message('injected') : (reply?.error ?? message('noFocusedInput')));
+  });
 });
 
-void loadSettingsAndProbe();
+run(loadSettingsAndProbe);

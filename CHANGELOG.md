@@ -2,6 +2,11 @@
 
 All notable changes to `voice-mode-daemon` are documented in this file.
 
+## [Unreleased]
+
+- Added Simplified Chinese to the MV3 Side Panel and toolbar, alongside the default English locale.
+- Documented local setup, connection troubleshooting, and fallback behavior in the Chinese README.
+
 ## [0.1.0] - 2026-11-22
 
 ### Added

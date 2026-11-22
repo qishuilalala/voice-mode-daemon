@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Voice Mode</title>
+    <title data-i18n="extensionName"></title>
     <style>
       :root {
         color-scheme: light dark;
@@ -91,67 +91,67 @@
   </head>
   <body>
     <h1>
-      <span>Voice Mode</span>
-      <span id="daemon-badge" class="badge" data-state="checking">Checking...</span>
+      <span data-i18n="extensionName"></span>
+      <span id="daemon-badge" class="badge" data-state="checking" data-i18n="checkingBadge"></span>
     </h1>
 
     <section>
-      <label for="daemon-url">Local Daemon URL</label>
+      <label for="daemon-url" data-i18n="daemonUrlLabel"></label>
       <input id="daemon-url" type="text" value="http://127.0.0.1:18790" />
 
-      <label for="daemon-token">Daemon Bearer Token</label>
-      <input id="daemon-token" type="password" placeholder="Paste sk-vmd-... from daemon.token" />
+      <label for="daemon-token" data-i18n="daemonTokenLabel"></label>
+      <input id="daemon-token" type="password" data-i18n-placeholder="daemonTokenPlaceholder" />
 
-      <label for="voice-select">Kokoro Speaker (103 voices)</label>
+      <label for="voice-select" data-i18n="voiceLabel"></label>
       <select id="voice-select"></select>
 
-      <label for="asr-model-select">Local ASR Engine</label>
+      <label for="asr-model-select" data-i18n="asrLabel"></label>
       <select id="asr-model-select">
-        <option value="zipformer2">Streaming Zipformer2 (zh/en)</option>
-        <option value="sensevoice">SenseVoice Small int8 (5-lang)</option>
+        <option value="zipformer2" data-i18n="zipformer2Label"></option>
+        <option value="sensevoice" data-i18n="sensevoiceLabel"></option>
       </select>
 
       <div class="row">
-        <button id="save-btn" type="button">Save &amp; Probe</button>
-        <button id="grant-site-btn" type="button">Grant Chat Site Access</button>
+        <button id="save-btn" type="button" data-i18n="saveButton"></button>
+        <button id="grant-site-btn" type="button" data-i18n="grantSiteButton"></button>
       </div>
     </section>
 
     <details id="byok-section">
-      <summary>Optional Cloud Fallback (BYOK)</summary>
-      <label for="byok-base-url">OpenAI-Compatible Base URL</label>
+      <summary data-i18n="cloudFallbackHeading"></summary>
+      <label for="byok-base-url" data-i18n="cloudUrlLabel"></label>
       <input id="byok-base-url" type="text" placeholder="https://api.openai.com/v1" />
 
-      <label for="byok-api-key">BYOK API Key</label>
+      <label for="byok-api-key" data-i18n="cloudKeyLabel"></label>
       <input id="byok-api-key" type="password" placeholder="sk-..." />
 
-      <label for="byok-tts-model">BYOK TTS Model</label>
+      <label for="byok-tts-model" data-i18n="cloudTtsModelLabel"></label>
       <input id="byok-tts-model" type="text" value="gpt-4o-mini-tts" />
 
-      <label for="byok-asr-model">BYOK ASR Model</label>
+      <label for="byok-asr-model" data-i18n="cloudAsrModelLabel"></label>
       <input id="byok-asr-model" type="text" value="whisper-1" />
     </details>
 
     <section>
-      <label for="read-input">Read Aloud (Markdown code &amp; tables skipped)</label>
-      <textarea id="read-input" rows="3" placeholder="Enter Markdown or click Read Selection..."></textarea>
+      <label for="read-input" data-i18n="readLabel"></label>
+      <textarea id="read-input" rows="3" data-i18n-placeholder="readPlaceholder"></textarea>
       <div class="row">
-        <button id="read-page-btn" type="button">Read Selection / Reply</button>
-        <button id="speak-text-btn" type="button">Speak Text</button>
-        <button id="stop-btn" type="button">Stop</button>
+        <button id="read-page-btn" type="button" data-i18n="readPageButton"></button>
+        <button id="speak-text-btn" type="button" data-i18n="speakTextButton"></button>
+        <button id="stop-btn" type="button" data-i18n="stopButton"></button>
       </div>
     </section>
 
     <section>
-      <label for="dictation-preview">Dictation &amp; Active Input Injection</label>
-      <textarea id="dictation-preview" rows="2" placeholder="Dictated transcript..."></textarea>
+      <label for="dictation-preview" data-i18n="dictationLabel"></label>
+      <textarea id="dictation-preview" rows="2" data-i18n-placeholder="dictationPlaceholder"></textarea>
       <div class="row">
-        <button id="mic-btn" type="button">Start Mic</button>
-        <button id="inject-btn" type="button">Inject into Focused Input</button>
+        <button id="mic-btn" type="button" data-i18n="startMicButton"></button>
+        <button id="inject-btn" type="button" data-i18n="injectButton"></button>
       </div>
     </section>
 
-    <div id="status-log" role="status" aria-live="polite">Ready.</div>
+    <div id="status-log" role="status" data-i18n="checkingStatus"></div>
     <script type="module" src="./sidepanel.js"></script>
   </body>
 </html>

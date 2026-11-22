@@ -7,6 +7,7 @@ Subjective engineering judgements for `voice-mode-daemon` (compiler, linter, and
 - **Deep modules over pass-throughs**: Hide protocol framing, model lifecycle, emotion prosody planning, and fallback timing behind narrow interfaces (`SpeechEngineRegistry`, `VoiceExtensionCoordinator`). Delete any wrapper whose removal leaves callers no more complex.
 - **Test at public seams**: Exercise behaviour through HTTP routes, `DaemonClient`, and public coordinator methods. Inject external collaborators (`NativeSpeechBackend`, `AudioSink`, `fetchImpl`) rather than mocking private helpers.
 - **Domain language alignment**: Name types, options, and tests using the exact terms in [`GLOSSARY.md`](./GLOSSARY.md).
+- **Side Panel messages**: Update `_locales/en/messages.json` and `_locales/zh_CN/messages.json` together, including placeholder names and positions. Translate visible labels while preserving stored settings, voice IDs, and message types.
 
 ## Standard Library & Minimalism
 

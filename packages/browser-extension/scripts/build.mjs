@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, rmSync } from 'node:fs';
+import { copyFileSync, cpSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
@@ -11,6 +11,7 @@ mkdirSync(DIST_DIR, { recursive: true });
 
 copyFileSync(join(PKG_ROOT, 'manifest.json'), join(DIST_DIR, 'manifest.json'));
 copyFileSync(join(PKG_ROOT, 'sidepanel.html'), join(DIST_DIR, 'sidepanel.html'));
+cpSync(join(PKG_ROOT, '_locales'), join(DIST_DIR, '_locales'), { recursive: true });
 
 const common = {
   bundle: true,
