@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Voice Mode",
+  "name": "__MSG_extensionName__",
   "version": "0.1.0",
-  "description": "Local Kokoro 103 TTS and Zipformer2/SenseVoice ASR via voice-daemon with <1s browser fallback.",
+  "default_locale": "en",
+  "description": "__MSG_extensionDescription__",
   "permissions": ["activeTab", "sidePanel", "storage"],
   "optional_permissions": ["scripting"],
   "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
@@ -20,7 +21,7 @@
     "default_path": "sidepanel.html"
   },
   "action": {
-    "default_title": "Open Voice Mode Side Panel"
+    "default_title": "__MSG_actionTitle__"
   },
   "content_scripts": [
     {

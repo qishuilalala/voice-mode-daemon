@@ -1,4 +1,5 @@
 import { dispatchServiceWorkerMessage, type SwRouterDeps } from './sw-router.js';
+import { message } from './i18n.ts';
 
 function configureSidePanel(): void {
   void chrome.sidePanel
@@ -24,7 +25,7 @@ async function ensureContentScriptOnTab(tabId: number): Promise<void> {
 
   const hasScripting = await chrome.permissions.contains({ permissions: ['scripting'] });
   if (!hasScripting) {
-    throw new Error('Grant active chat site access in Side Panel before interacting with this page.');
+    throw new Error(message('siteAccessRequired'));
   }
   await chrome.scripting.executeScript({
     target: { tabId },

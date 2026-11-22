@@ -1,4 +1,5 @@
 import { redactSecrets } from '@voice-mode/core';
+import { message } from './i18n.ts';
 
 export interface SwMessageSender {
   id?: string;
@@ -39,7 +40,10 @@ export function dispatchServiceWorkerMessage(
   }
 
   if (Boolean(sender.tab) || !sender.id || sender.id !== deps.runtimeId) {
-    sendResponse({ ok: false, error: 'Forbidden message sender' });
+    sendResponse({
+      ok: false,
+      error: message('forbiddenSender', undefined, 'Forbidden message sender'),
+    });
     return false;
   }
 
@@ -52,7 +56,10 @@ export function dispatchServiceWorkerMessage(
     try {
       const targetTabId = await deps.queryActiveTabId();
       if (targetTabId === undefined) {
-        sendResponse({ ok: false, error: 'No active browser tab found' });
+        sendResponse({
+          ok: false,
+          error: message('noActiveTab', undefined, 'No active browser tab found'),
+        });
         return;
       }
 
