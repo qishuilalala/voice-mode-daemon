@@ -508,11 +508,11 @@ packages:
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
 
   '@voice-mode/browser@file:vendor/voice-mode-browser-0.1.0.tgz':
-    resolution: {integrity: sha512-JKOBxUbLo6xeLJ6qmcIs9pVfUM96ST+XRR7abBsKW16v/kdnCGCYkL+jkct5ytHxE0ORvgpXXEnmdSbJpO7HrQ==, tarball: file:vendor/voice-mode-browser-0.1.0.tgz}
+    resolution: {integrity: sha512-GyO6SrQ3uhugahZH3savPG3e568kaHIsaCyCCVn484g1ABGg/ngVUeGoAsYG+SnGNsla5FYnxWi25cs0VwVf6A==, tarball: file:vendor/voice-mode-browser-0.1.0.tgz}
     version: 0.1.0
 
   '@voice-mode/core@file:vendor/voice-mode-core-0.1.0.tgz':
-    resolution: {integrity: sha512-B3ESlrTFoKd4bWwe9H+CFPGUNQB3uT7vROs2zrWggXdHwtKQmSLrWbYPPBxQfIObOOvIKWsGClB2cB0uwohsIQ==, tarball: file:vendor/voice-mode-core-0.1.0.tgz}
+    resolution: {integrity: sha512-/nI1MWeUvOvDxUpqfecRYc39UatLaqIxaO2HCVTc69yO0Xmr4oNA3djIGSbIFTyOpH3oNdkfQKq3DpxQXcgBiQ==, tarball: file:vendor/voice-mode-core-0.1.0.tgz}
     version: 0.1.0
 
   acorn-jsx@5.3.2:
