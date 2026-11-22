@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Voice Mode</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      body {
+        margin: 0;
+        padding: 12px;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+      h1 {
+        font-size: 15px;
+        margin: 0 0 8px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .badge {
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: rgba(120, 120, 128, 0.2);
+      }
+      .badge[data-state="ready"] {
+        background: rgba(34, 197, 94, 0.22);
+      }
+      .badge[data-state="fallback"] {
+        background: rgba(245, 158, 11, 0.25);
+      }
+      section {
+        border: 1px solid rgba(120, 120, 128, 0.28);
+        border-radius: 8px;
+        padding: 10px;
+        margin-bottom: 10px;
+      }
+      label {
+        display: block;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      input,
+      select,
+      textarea,
+      button {
+        font: inherit;
+      }
+      input[type="text"],
+      input[type="password"],
+      select,
+      textarea {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 6px 8px;
+        border-radius: 6px;
+        border: 1px solid rgba(120, 120, 128, 0.38);
+        margin-bottom: 8px;
+      }
+      .row {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      button {
+        padding: 6px 10px;
+        border-radius: 6px;
+        border: 1px solid rgba(120, 120, 128, 0.4);
+        cursor: pointer;
+      }
+      #status-log {
+        font-size: 12px;
+        opacity: 0.85;
+        min-height: 18px;
+        word-break: break-word;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>
+      <span>Voice Mode</span>
+      <span id="daemon-badge" class="badge" data-state="checking">Checking...</span>
+    </h1>
+
+    <section>
+      <label for="daemon-url">Local Daemon URL</label>
+      <input id="daemon-url" type="text" value="http://127.0.0.1:18790" />
+
+      <label for="daemon-token">Daemon Bearer Token</label>
+      <input id="daemon-token" type="password" placeholder="Paste ~/.cache/voice-mode/daemon.token" />
+
+      <label for="voice-select">Kokoro Speaker (103 voices)</label>
+      <select id="voice-select">
+        <option value="zf_001">zf_001 · Mandarin Female</option>
+        <option value="zm_010">zm_010 · Mandarin Male</option>
+        <option value="af_heart">af_heart · English US Female</option>
+        <option value="am_adam">am_adam · English US Male</option>
+        <option value="bf_emma">bf_emma · English UK Female</option>
+        <option value="zf_xiaobei">zf_xiaobei · Xiaobei</option>
+      </select>
+
+      <label for="asr-model-select">Local ASR Engine</label>
+      <select id="asr-model-select">
+        <option value="zipformer2">Streaming Zipformer2 (zh/en)</option>
+        <option value="sensevoice">SenseVoice Small int8 (5-lang)</option>
+      </select>
+
+      <div class="row">
+        <button id="save-btn" type="button">Save &amp; Probe</button>
+        <button id="grant-site-btn" type="button">Grant Chat Site Access</button>
+      </div>
+    </section>
+
+    <section>
+      <label for="read-input">Read Aloud (Markdown code &amp; tables skipped)</label>
+      <textarea id="read-input" rows="3" placeholder="Enter Markdown or click Read Selection..."></textarea>
+      <div class="row">
+        <button id="read-page-btn" type="button">Read Selection / Reply</button>
+        <button id="speak-text-btn" type="button">Speak Text</button>
+        <button id="stop-btn" type="button">Stop</button>
+      </div>
+    </section>
+
+    <section>
+      <label for="dictation-preview">Dictation &amp; Active Input Injection</label>
+      <textarea id="dictation-preview" rows="2" placeholder="Dictated transcript..."></textarea>
+      <div class="row">
+        <button id="mic-btn" type="button">Start Mic</button>
+        <button id="inject-btn" type="button">Inject into Focused Input</button>
+      </div>
+    </section>
+
+    <div id="status-log" role="status" aria-live="polite">Ready.</div>
+    <script type="module" src="./sidepanel.js"></script>
+  </body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "name": "@voice-mode/browser-extension",
+  "version": "0.1.0",
+  "description": "Chrome and Edge Manifest V3 extension for Voice Mode backed by local voice-daemon with <1s fallback.",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm run build && node --test \"test/*.test.ts\""
+  },
+  "dependencies": {
+    "@voice-mode/browser": "file:../../vendor/voice-mode-browser-0.1.0.tgz",
+    "@voice-mode/core": "file:../../vendor/voice-mode-core-0.1.0.tgz"
+  }
+}

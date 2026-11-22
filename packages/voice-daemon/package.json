@@ -1,0 +1,32 @@
+{
+  "name": "@voice-mode/daemon",
+  "version": "0.1.0",
+  "description": "Native Node.js loopback speech acceleration daemon (Kokoro 103 TTS + Zipformer2 & SenseVoice ASR).",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "bin": {
+    "voice-daemon": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm run build && node --test \"test/*.test.ts\""
+  },
+  "dependencies": {
+    "@voice-mode/core": "file:../../vendor/voice-mode-core-0.1.0.tgz",
+    "sherpa-onnx-node": "1.13.6"
+  }
+}
