@@ -1,4 +1,4 @@
-import { redactSecrets } from '@voice-mode/core';
+import { dispatchServiceWorkerMessage, type SwRouterDeps } from './sw-router.js';
 
 function configureSidePanel(): void {
   void chrome.sidePanel
@@ -32,56 +32,18 @@ async function ensureContentScriptOnTab(tabId: number): Promise<void> {
   });
 }
 
-chrome.runtime.onMessage.addListener((rawMsg, _sender, sendResponse) => {
-  if (typeof rawMsg !== 'object' || rawMsg === null) return false;
-  const msg = rawMsg as {
-    type?: string;
-    tabId?: number;
-    text?: string;
-    replacements?: unknown[];
-  };
+const liveDeps: SwRouterDeps = {
+  get runtimeId() {
+    return chrome.runtime.id;
+  },
+  async queryActiveTabId() {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    return tabs[0]?.id;
+  },
+  ensureContentScript: ensureContentScriptOnTab,
+  sendTabMessage: (tabId, message) => chrome.tabs.sendMessage(tabId, message),
+};
 
-  if (msg.type === 'VM_SW_STATUS') {
-    sendResponse({ ok: true, serviceWorker: 'voice-mode-mv3', version: '0.1.0' });
-    return false;
-  }
-
-  if (msg.type === 'VM_READ_ACTIVE_TAB' || msg.type === 'VM_INJECT_ACTIVE_TAB') {
-    void (async () => {
-      try {
-        let targetTabId = msg.tabId;
-        if (targetTabId === undefined) {
-          const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-          targetTabId = tabs[0]?.id;
-        }
-        if (targetTabId === undefined) {
-          sendResponse({ ok: false, error: 'No active browser tab found' });
-          return;
-        }
-
-        await ensureContentScriptOnTab(targetTabId);
-
-        if (msg.type === 'VM_READ_ACTIVE_TAB') {
-          const reply = await chrome.tabs.sendMessage(targetTabId, {
-            type: 'VM_EXTRACT_PAGE_TEXT',
-          });
-          sendResponse(reply);
-          return;
-        }
-
-        const reply = await chrome.tabs.sendMessage(targetTabId, {
-          type: 'VM_INJECT_DICTATION',
-          text: msg.text ?? '',
-          replacements: msg.replacements ?? [],
-        });
-        sendResponse(reply);
-      } catch (err) {
-        const safe = redactSecrets(err instanceof Error ? err.message : String(err));
-        sendResponse({ ok: false, error: safe });
-      }
-    })();
-    return true;
-  }
-
-  return false;
+chrome.runtime.onMessage.addListener((rawMsg, sender, sendResponse) => {
+  return dispatchServiceWorkerMessage(rawMsg, sender, sendResponse, liveDeps);
 });

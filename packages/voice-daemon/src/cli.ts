@@ -21,7 +21,7 @@ function printHelp(): void {
       `voice-daemon v${DAEMON_VERSION} — Local loopback neural speech daemon`,
       '',
       'Usage:',
-      '  voice-daemon [serve] [--port 18790] [--token-file <path>] [--allow-unauthenticated-loopback] [--cache-dir <dir>]',
+      '  voice-daemon [serve] [--port 18790] [--token-file <path>] [--cache-dir <dir>]',
       '  voice-daemon models status [--cache-dir <dir>] [--json]',
       '  voice-daemon models download [kokoro-int8|zipformer2|sensevoice-int8|all] [--cache-dir <dir>] [--mirror <https-url>]',
       '  voice-daemon token-path [--token-file <path>]',
@@ -41,7 +41,6 @@ async function main(): Promise<void> {
       host: { type: 'string' },
       token: { type: 'string' },
       'token-file': { type: 'string' },
-      'allow-unauthenticated-loopback': { type: 'boolean' },
       'cache-dir': { type: 'string' },
       mirror: { type: 'string' },
       json: { type: 'boolean' },
@@ -127,14 +126,13 @@ async function main(): Promise<void> {
       host: values.host ?? DEFAULT_DAEMON_HOST,
       port,
       tokenPath,
-      allowUnauthenticatedLoopback: values['allow-unauthenticated-loopback'] ?? false,
       ...(values.token ? { token: values.token } : {}),
       ...(values['cache-dir'] ? { cacheDir: values['cache-dir'] } : {}),
     };
 
     const handle = await startVoiceDaemonServer(serverOpts);
     process.stdout.write(
-      `voice-daemon v${DAEMON_VERSION} listening on http://${handle.host}:${handle.port} (auth=${serverOpts.allowUnauthenticatedLoopback ? 'loopback-origin' : `bearer:${tokenPath}`})\n`,
+      `voice-daemon v${DAEMON_VERSION} listening on http://${handle.host}:${handle.port} (auth=bearer:${tokenPath})\n`,
     );
 
     const shutdown = () => {

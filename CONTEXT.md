@@ -13,7 +13,7 @@ Monorepo housing the native Node.js loopback speech daemon (`@voice-mode/daemon`
 - `packages/browser-extension/` — `@voice-mode/browser-extension@0.1.0` (Chrome/Edge MV3).
   - `manifest.json` — Strict least-privilege MV3 (`activeTab`, `sidePanel`, `storage`; zero `<all_urls>`; optional host permissions for DeepSeek, Gemini, Kimi).
   - `src/coordinator.ts` — Deep module wiring `DaemonClient` (`< 1s` fallback to browser `speechSynthesis` or optional BYOK), `SentenceSegmenter`, `PlaybackQueue`, `CloudDictationSession`, and `FocusTextInjector`.
-  - `src/sw.ts`, `src/sidepanel.ts`, `src/content.ts` — Service Worker, Side Panel UI, and idempotent on-demand Content Script.
+  - `src/sw-router.ts`, `src/sw.ts`, `src/sidepanel.ts`, `src/content.ts` — Sender-verified Service Worker, dynamic 103-voice Side Panel UI with BYOK/WebSpeech fallback, and idempotent on-demand Content Script.
 - `scripts/check-release-gate.mjs` — Enforces `0.1.0` versions, MIT license, `CONTEXT.md <= 110` lines, zero weights/GPL in workspace, and MV3 Web Store compliance.
 
 ## Context Pointers

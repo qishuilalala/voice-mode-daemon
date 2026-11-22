@@ -34,11 +34,19 @@
       .badge[data-state="fallback"] {
         background: rgba(245, 158, 11, 0.25);
       }
-      section {
+      section,
+      details {
         border: 1px solid rgba(120, 120, 128, 0.28);
         border-radius: 8px;
         padding: 10px;
         margin-bottom: 10px;
+      }
+      summary {
+        font-weight: 600;
+        cursor: pointer;
+      }
+      details[open] summary {
+        margin-bottom: 8px;
       }
       label {
         display: block;
@@ -92,17 +100,10 @@
       <input id="daemon-url" type="text" value="http://127.0.0.1:18790" />
 
       <label for="daemon-token">Daemon Bearer Token</label>
-      <input id="daemon-token" type="password" placeholder="Paste ~/.cache/voice-mode/daemon.token" />
+      <input id="daemon-token" type="password" placeholder="Paste sk-vmd-... from daemon.token" />
 
       <label for="voice-select">Kokoro Speaker (103 voices)</label>
-      <select id="voice-select">
-        <option value="zf_001">zf_001 · Mandarin Female</option>
-        <option value="zm_010">zm_010 · Mandarin Male</option>
-        <option value="af_heart">af_heart · English US Female</option>
-        <option value="am_adam">am_adam · English US Male</option>
-        <option value="bf_emma">bf_emma · English UK Female</option>
-        <option value="zf_xiaobei">zf_xiaobei · Xiaobei</option>
-      </select>
+      <select id="voice-select"></select>
 
       <label for="asr-model-select">Local ASR Engine</label>
       <select id="asr-model-select">
@@ -115,6 +116,21 @@
         <button id="grant-site-btn" type="button">Grant Chat Site Access</button>
       </div>
     </section>
+
+    <details id="byok-section">
+      <summary>Optional Cloud Fallback (BYOK)</summary>
+      <label for="byok-base-url">OpenAI-Compatible Base URL</label>
+      <input id="byok-base-url" type="text" placeholder="https://api.openai.com/v1" />
+
+      <label for="byok-api-key">BYOK API Key</label>
+      <input id="byok-api-key" type="password" placeholder="sk-..." />
+
+      <label for="byok-tts-model">BYOK TTS Model</label>
+      <input id="byok-tts-model" type="text" value="gpt-4o-mini-tts" />
+
+      <label for="byok-asr-model">BYOK ASR Model</label>
+      <input id="byok-asr-model" type="text" value="whisper-1" />
+    </details>
 
     <section>
       <label for="read-input">Read Aloud (Markdown code &amp; tables skipped)</label>

@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 
 export const DEFAULT_DAEMON_HOST = '127.0.0.1';
 export const DEFAULT_DAEMON_PORT = 18790;
+export const DAEMON_TOKEN_PREFIX = 'sk-vmd-';
 
 export function defaultDaemonTokenPath(homeDir: string = homedir()): string {
   return join(homeDir, '.cache', 'voice-mode', 'daemon.token');
@@ -32,7 +33,10 @@ export function isAllowedLoopbackHost(hostHeader: string | undefined, boundPort:
   ) {
     return true;
   }
-  if (boundPort === 80 && (trimmed === '127.0.0.1' || trimmed === 'localhost' || trimmed === '[::1]')) {
+  if (
+    boundPort === 80 &&
+    (trimmed === '127.0.0.1' || trimmed === 'localhost' || trimmed === '[::1]')
+  ) {
     return true;
   }
   return false;
@@ -85,7 +89,7 @@ export async function loadOrCreateDaemonToken(
 
   try {
     const existing = (await readFile(tokenPath, 'utf8')).trim();
-    if (existing.length >= 32) {
+    if (existing.startsWith(DAEMON_TOKEN_PREFIX) && existing.length >= 40) {
       if (process.platform !== 'win32') {
         const info = await stat(tokenPath);
         if ((info.mode & 0o777) !== 0o600) {
@@ -101,7 +105,7 @@ export async function loadOrCreateDaemonToken(
     }
   }
 
-  const generated = randomBytes(32).toString('hex');
+  const generated = `${DAEMON_TOKEN_PREFIX}${randomBytes(24).toString('hex')}`;
   const tmpPath = `${tokenPath}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
   const fh = await open(tmpPath, 'wx', 0o600);
   try {
@@ -124,7 +128,6 @@ export interface SecurityCheckInput {
   authorizationHeader: string | undefined;
   boundPort: number;
   expectedToken: string;
-  allowUnauthenticatedLoopback: boolean;
 }
 
 export type SecurityDecision =
@@ -162,20 +165,21 @@ export function evaluateLoopbackSecurity(input: SecurityCheckInput): SecurityDec
   }
 
   const rawOrigin = input.originHeader?.trim();
-  if (rawOrigin !== undefined && rawOrigin.length > 0) {
-    if (!isAllowedOrigin(rawOrigin)) {
-      return {
-        ok: false,
-        status: 403,
-        error: 'Forbidden Origin: origin is not in loopback/extension allowlist',
-        headers: { Vary: 'Origin' },
-      };
-    }
+  const hasOrigin = rawOrigin !== undefined && rawOrigin.length > 0;
+  if (hasOrigin && !isAllowedOrigin(rawOrigin)) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'Forbidden Origin: origin is not in loopback/extension allowlist',
+      headers: { Vary: 'Origin' },
+    };
   }
 
-  const corsHeaders = buildCorsHeaders(rawOrigin && rawOrigin.length > 0 ? rawOrigin : undefined);
+  const corsHeaders = buildCorsHeaders(hasOrigin ? rawOrigin : undefined);
+  const isOptions = input.method.toUpperCase() === 'OPTIONS';
 
-  if (input.method.toUpperCase() === 'OPTIONS') {
+  // Browser CORS preflight carries an allowlisted Origin without Authorization header.
+  if (isOptions && hasOrigin) {
     return {
       ok: true,
       isPreflight: true,
@@ -183,41 +187,21 @@ export function evaluateLoopbackSecurity(input: SecurityCheckInput): SecurityDec
     };
   }
 
-  const tokenValid = verifyBearerToken(input.authorizationHeader, input.expectedToken);
-
-  if (!input.allowUnauthenticatedLoopback) {
-    if (!tokenValid) {
-      return {
-        ok: false,
-        status: 401,
-        error: 'Unauthorized: valid Bearer token required',
-        headers: {
-          ...corsHeaders,
-          'WWW-Authenticate': 'Bearer realm="voice-daemon"',
-        },
-      };
-    }
-    return {
-      ok: true,
-      isPreflight: false,
-      headers: corsHeaders,
-    };
-  }
-
-  // Explicit --allow-unauthenticated-loopback mode:
-  // Absent Origin is ONLY permitted when a valid Bearer token is supplied.
-  if (!rawOrigin && !tokenValid) {
+  if (!verifyBearerToken(input.authorizationHeader, input.expectedToken)) {
     return {
       ok: false,
-      status: 403,
-      error: 'Forbidden: absent Origin requires a valid Bearer token',
-      headers: {},
+      status: 401,
+      error: 'Unauthorized: valid Bearer token required',
+      headers: {
+        ...corsHeaders,
+        'WWW-Authenticate': 'Bearer realm="voice-daemon"',
+      },
     };
   }
 
   return {
     ok: true,
-    isPreflight: false,
+    isPreflight: isOptions,
     headers: corsHeaders,
   };
 }

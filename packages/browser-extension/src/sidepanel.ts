@@ -1,13 +1,14 @@
 import type { CloudDictationSession } from '@voice-mode/browser';
 import {
   DEFAULT_DAEMON_BASE_URL,
+  KOKORO_SPEAKERS_103,
   redactSecrets,
   type AsrReplacement,
   type DaemonHealthResult,
 } from '@voice-mode/core';
 import {
   VoiceExtensionCoordinator,
-  type TranscriptionSummary,
+  buildKokoroVoiceSelectOptions,
 } from './coordinator.js';
 
 interface StoredSettings {
@@ -15,6 +16,10 @@ interface StoredSettings {
   daemonToken?: string;
   voice?: string;
   asrModel?: 'zipformer2' | 'sensevoice';
+  byokBaseUrl?: string;
+  byokApiKey?: string;
+  byokTtsModel?: string;
+  byokAsrModel?: string;
   replacements?: AsrReplacement[];
 }
 
@@ -30,6 +35,10 @@ const urlInput = document.getElementById('daemon-url') as HTMLInputElement;
 const tokenInput = document.getElementById('daemon-token') as HTMLInputElement;
 const voiceSelect = document.getElementById('voice-select') as HTMLSelectElement;
 const asrSelect = document.getElementById('asr-model-select') as HTMLSelectElement;
+const byokBaseInput = document.getElementById('byok-base-url') as HTMLInputElement;
+const byokKeyInput = document.getElementById('byok-api-key') as HTMLInputElement;
+const byokTtsModelInput = document.getElementById('byok-tts-model') as HTMLInputElement;
+const byokAsrModelInput = document.getElementById('byok-asr-model') as HTMLInputElement;
 const readInput = document.getElementById('read-input') as HTMLTextAreaElement;
 const dictationPreview = document.getElementById('dictation-preview') as HTMLTextAreaElement;
 const statusLog = document.getElementById('status-log') as HTMLElement;
@@ -40,6 +49,8 @@ let currentReplacements: AsrReplacement[] = [
   { from: ['kimi chat'], to: 'Kimi' },
 ];
 let dictationSession: CloudDictationSession | null = null;
+let webSpeechHandle: { stop(): void } | null = null;
+let daemonHealthy = false;
 
 function setStatus(message: string): void {
   statusLog.textContent = redactSecrets(message);
@@ -50,11 +61,31 @@ function setBadge(state: 'checking' | 'ready' | 'fallback', text: string): void 
   badgeEl.textContent = text;
 }
 
+function populateVoiceDropdown(voices: readonly string[], preferredVoice?: string): void {
+  const previous = preferredVoice ?? voiceSelect.value ?? 'zf_001';
+  const options = buildKokoroVoiceSelectOptions(voices);
+  voiceSelect.replaceChildren();
+  for (const opt of options) {
+    const el = document.createElement('option');
+    el.value = opt.value;
+    el.textContent = opt.label;
+    voiceSelect.appendChild(el);
+  }
+  if (options.some((o) => o.value === previous)) {
+    voiceSelect.value = previous;
+  } else if (options[0]) {
+    voiceSelect.value = options[0].value;
+  }
+}
+
+populateVoiceDropdown(KOKORO_SPEAKERS_103, 'zf_001');
+
 const coordinator = new VoiceExtensionCoordinator({
   daemonBaseUrl: DEFAULT_DAEMON_BASE_URL,
   replacements: currentReplacements,
   onFallback: (surface, reason) => {
-    setBadge('fallback', 'Browser Fallback (<1s)');
+    daemonHealthy = false;
+    setBadge('fallback', 'Fallback (<1s)');
     setStatus(`Fallback (${surface}): ${reason}`);
   },
   onError: (msg) => setStatus(`Error: ${msg}`),
@@ -66,59 +97,90 @@ async function loadSettingsAndProbe(): Promise<DaemonHealthResult> {
     'daemonToken',
     'voice',
     'asrModel',
+    'byokBaseUrl',
+    'byokApiKey',
+    'byokTtsModel',
+    'byokAsrModel',
     'replacements',
   ])) as StoredSettings;
 
   urlInput.value = stored.daemonBaseUrl ?? DEFAULT_DAEMON_BASE_URL;
   tokenInput.value = stored.daemonToken ?? '';
-  if (stored.voice) voiceSelect.value = stored.voice;
+  byokBaseInput.value = stored.byokBaseUrl ?? '';
+  byokKeyInput.value = stored.byokApiKey ?? '';
+  byokTtsModelInput.value = stored.byokTtsModel ?? 'gpt-4o-mini-tts';
+  byokAsrModelInput.value = stored.byokAsrModel ?? 'whisper-1';
   if (stored.asrModel) asrSelect.value = stored.asrModel;
   if (Array.isArray(stored.replacements)) {
     currentReplacements = stored.replacements;
   }
 
+  const byokBase = byokBaseInput.value.trim();
+  const byokKey = byokKeyInput.value.trim();
+  const hasByok = byokBase.length > 0 && byokKey.length > 0;
+
   await coordinator.reconfigure({
     daemonBaseUrl: urlInput.value.trim() || DEFAULT_DAEMON_BASE_URL,
     ...(tokenInput.value.trim() ? { daemonToken: tokenInput.value.trim() } : {}),
-    voice: voiceSelect.value,
+    voice: stored.voice ?? voiceSelect.value ?? 'zf_001',
     asrModel: (asrSelect.value as 'zipformer2' | 'sensevoice') || 'zipformer2',
     replacements: currentReplacements,
+    ...(hasByok
+      ? {
+          byokTts: {
+            baseUrl: byokBase,
+            apiKey: byokKey,
+            model: byokTtsModelInput.value.trim() || 'gpt-4o-mini-tts',
+          },
+          byokAsr: {
+            baseUrl: byokBase,
+            apiKey: byokKey,
+            model: byokAsrModelInput.value.trim() || 'whisper-1',
+          },
+        }
+      : {}),
     onFallback: (surface, reason) => {
-      setBadge('fallback', 'Browser Fallback (<1s)');
+      daemonHealthy = false;
+      setBadge('fallback', 'Fallback (<1s)');
       setStatus(`Fallback (${surface}): ${reason}`);
     },
     onError: (msg) => setStatus(`Error: ${msg}`),
   });
 
   const health = await coordinator.probeHealth();
+  daemonHealthy = health.ok;
   if (health.ok) {
+    populateVoiceDropdown(health.voices, stored.voice ?? voiceSelect.value);
     setBadge('ready', `Daemon v${health.version} (${health.voices.length} voices)`);
     setStatus('Connected to local voice-daemon.');
   } else {
-    setBadge('fallback', 'Browser Fallback (<1s)');
+    populateVoiceDropdown(KOKORO_SPEAKERS_103, stored.voice ?? voiceSelect.value);
+    setBadge('fallback', hasByok ? 'BYOK Cloud Fallback (<1s)' : 'Browser Fallback (<1s)');
     setStatus(`Daemon unavailable (${health.error ?? 'offline'}); using <1s fallback.`);
   }
   return health;
 }
 
-async function saveCurrentSettings(overrides?: Partial<StoredSettings>): Promise<DaemonHealthResult> {
-  if (overrides?.daemonBaseUrl !== undefined) urlInput.value = overrides.daemonBaseUrl;
-  if (overrides?.daemonToken !== undefined) tokenInput.value = overrides.daemonToken;
-  if (overrides?.voice !== undefined) voiceSelect.value = overrides.voice;
-  if (overrides?.asrModel !== undefined) asrSelect.value = overrides.asrModel;
-  if (overrides?.replacements !== undefined) currentReplacements = overrides.replacements;
-
+async function saveCurrentSettings(): Promise<DaemonHealthResult> {
   await chrome.storage.local.set({
     daemonBaseUrl: urlInput.value.trim() || DEFAULT_DAEMON_BASE_URL,
     daemonToken: tokenInput.value.trim(),
     voice: voiceSelect.value,
     asrModel: asrSelect.value,
+    byokBaseUrl: byokBaseInput.value.trim(),
+    byokApiKey: byokKeyInput.value.trim(),
+    byokTtsModel: byokTtsModelInput.value.trim() || 'gpt-4o-mini-tts',
+    byokAsrModel: byokAsrModelInput.value.trim() || 'whisper-1',
     replacements: currentReplacements,
   });
   return loadSettingsAndProbe();
 }
 
 document.getElementById('save-btn')?.addEventListener('click', () => {
+  void saveCurrentSettings();
+});
+
+voiceSelect?.addEventListener('change', () => {
   void saveCurrentSettings();
 });
 
@@ -167,11 +229,43 @@ document.getElementById('stop-btn')?.addEventListener('click', () => {
 
 micBtn?.addEventListener('click', () => {
   void (async () => {
+    if (webSpeechHandle) {
+      webSpeechHandle.stop();
+      webSpeechHandle = null;
+      micBtn.textContent = 'Start Mic';
+      return;
+    }
     if (dictationSession && dictationSession.state !== 'idle') {
       await dictationSession.stop();
       micBtn.textContent = 'Start Mic';
       return;
     }
+
+    if (!daemonHealthy && !coordinator.hasConfiguredByokAsr()) {
+      try {
+        webSpeechHandle = coordinator.startWebSpeechFallbackDictation({
+          replacements: currentReplacements,
+          onStateChange: (active) => {
+            micBtn.textContent = active ? 'Stop Mic' : 'Start Mic';
+            if (!active) webSpeechHandle = null;
+            setStatus(active ? 'Listening via browser SpeechRecognition fallback...' : 'Mic idle.');
+          },
+          onFinalTranscript: (text) => {
+            dictationPreview.value = text;
+            void chrome.runtime.sendMessage({
+              type: 'VM_INJECT_ACTIVE_TAB',
+              text,
+              replacements: currentReplacements,
+            });
+          },
+          onError: (err) => setStatus(err.message),
+        });
+      } catch (err) {
+        setStatus(err instanceof Error ? err.message : String(err));
+      }
+      return;
+    }
+
     dictationSession = coordinator.createDictationSession({
       onStateChange: (st) => {
         micBtn.textContent = st === 'idle' ? 'Start Mic' : 'Stop Mic';
@@ -203,49 +297,5 @@ document.getElementById('inject-btn')?.addEventListener('click', () => {
     setStatus(reply?.ok ? 'Injected into focused input.' : (reply?.error ?? 'No focused input.'));
   })();
 });
-
-export interface SidePanelAutomationBridge {
-  configure(settings: Partial<StoredSettings>): Promise<DaemonHealthResult>;
-  synthesize(
-    text: string,
-    opts?: { voice?: string; rate?: number },
-  ): Promise<{ byteLength: number; mime: string; usedFallback: boolean; elapsedMs: number }>;
-  transcribe(
-    samples: number[],
-    sampleRate: number,
-    asrModel?: 'zipformer2' | 'sensevoice',
-  ): Promise<TranscriptionSummary>;
-  injectIntoTab(tabId: number, text: string): Promise<{ ok?: boolean; error?: string }>;
-}
-
-const bridge: SidePanelAutomationBridge = {
-  configure: (settings) => saveCurrentSettings(settings),
-  async synthesize(text, opts) {
-    const { result, usedFallback, elapsedMs } = await coordinator.synthesizeOnce(text, opts);
-    return {
-      byteLength: result.audio.byteLength,
-      mime: result.mime,
-      usedFallback,
-      elapsedMs,
-    };
-  },
-  async transcribe(samples, sampleRate, asrModel) {
-    if (asrModel && asrSelect.value !== asrModel) {
-      await saveCurrentSettings({ asrModel });
-    }
-    return coordinator.transcribeAudio(Float32Array.from(samples), sampleRate);
-  },
-  async injectIntoTab(tabId, text) {
-    return (await chrome.runtime.sendMessage({
-      type: 'VM_INJECT_ACTIVE_TAB',
-      tabId,
-      text,
-      replacements: currentReplacements,
-    })) as { ok?: boolean; error?: string };
-  },
-};
-
-(globalThis as unknown as { __voiceModeSidePanel?: SidePanelAutomationBridge }).__voiceModeSidePanel =
-  bridge;
 
 void loadSettingsAndProbe();

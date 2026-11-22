@@ -1,4 +1,5 @@
 export {
+  DAEMON_TOKEN_PREFIX,
   DEFAULT_DAEMON_HOST,
   DEFAULT_DAEMON_PORT,
   defaultDaemonTokenPath,
@@ -24,6 +25,7 @@ export {
   type DaemonModelBundleSpec,
   type DownloadModelOptions,
   type ModelCacheOptions,
+  type RuntimeArchiveSpec,
 } from './model-cache.js';
 
 export {
@@ -36,7 +38,6 @@ export {
 export {
   KOKORO_EXPOSED_VOICES,
   KOKORO_SPEAKER_NAMES,
-  KOKORO_VOICE_ALIASES,
   ModelNotInstalledError,
   SpeechEngineRegistry,
   clampKokoroSpeed,

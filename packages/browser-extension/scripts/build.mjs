@@ -39,10 +39,4 @@ await Promise.all([
     outfile: join(DIST_DIR, 'content.js'),
     format: 'iife',
   }),
-  build({
-    ...common,
-    entryPoints: [join(PKG_ROOT, 'src', 'coordinator.ts')],
-    outfile: join(DIST_DIR, 'coordinator.js'),
-    format: 'esm',
-  }),
 ]);

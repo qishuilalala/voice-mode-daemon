@@ -9,6 +9,11 @@ import {
   DEFAULT_DAEMON_BASE_URL,
   DaemonClient,
   KOKORO_DEFAULT_SPEAKERS,
+  KOKORO_F0,
+  KOKORO_NAMED,
+  KOKORO_PINNED,
+  KOKORO_POPULAR_MALE,
+  KOKORO_SPEAKERS_103,
   OpenAiCompatAsrTransport,
   OpenAiCompatTtsEngine,
   SentenceSegmenter,
@@ -27,12 +32,73 @@ import {
   type TtsSynthResult,
 } from '@voice-mode/core';
 
-export const SPEECH_SYNTHESIS_MIME = 'application/x-speech-synthesis';
+export const SPEECH_SYNTHESIS_MIME = 'text/x-speech-synthesis-utf8';
 export const DEFAULT_EXTENSION_PROBE_TIMEOUT_MS = 500;
 
-const PENDING_SPEECH_TEXT = new WeakMap<Uint8Array, string>();
+const UTF8_ENCODER = new TextEncoder();
+const UTF8_DECODER = new TextDecoder('utf-8');
 
-export type SpeakWithBrowserFn = (plainText: string, rate: number, signal?: AbortSignal) => Promise<void>;
+export interface VoiceSelectOption {
+  value: string;
+  label: string;
+}
+
+/**
+ * Build dynamic `<select>` options for all 103 Kokoro voices (`health.voices`),
+ * ordering curated defaults & popular voices first while keeping all 103 voices selectable.
+ */
+export function buildKokoroVoiceSelectOptions(
+  voices: readonly string[] = KOKORO_SPEAKERS_103,
+): VoiceSelectOption[] {
+  const source = voices.length > 0 ? voices : KOKORO_SPEAKERS_103;
+  const sidByName = new Map<string, number>();
+  KOKORO_SPEAKERS_103.forEach((id, sid) => sidByName.set(id.toLowerCase(), sid));
+
+  const formatLabel = (voiceId: string): string => {
+    const sid = sidByName.get(voiceId.toLowerCase());
+    if (sid === undefined) return voiceId;
+    const named = KOKORO_NAMED[sid];
+    const maleStyle = KOKORO_POPULAR_MALE[sid];
+    const hz = KOKORO_F0[sid];
+    const parts = [voiceId];
+    if (named) parts.push(`${named.en}/${named.zh}`);
+    if (maleStyle) parts.push(`${maleStyle} male`);
+    else if (voiceId.startsWith('af_')) parts.push('EN-US female');
+    else if (voiceId.startsWith('bf_')) parts.push('EN-GB');
+    else if (typeof hz === 'number') parts.push(`${hz < 180 ? 'male' : 'female'} ${hz}Hz`);
+    return parts.join(' · ');
+  };
+
+  const priorityIds = [
+    ...KOKORO_DEFAULT_SPEAKERS.map((s) => KOKORO_SPEAKERS_103[s.sid] ?? s.id),
+    ...KOKORO_PINNED.map((sid) => KOKORO_SPEAKERS_103[sid]).filter((v): v is string => Boolean(v)),
+  ];
+
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+  const available = new Set(source);
+
+  for (const id of priorityIds) {
+    if (available.has(id) && !seen.has(id)) {
+      seen.add(id);
+      ordered.push(id);
+    }
+  }
+  for (const id of source) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      ordered.push(id);
+    }
+  }
+
+  return ordered.map((value) => ({ value, label: formatLabel(value) }));
+}
+
+export type SpeakWithBrowserFn = (
+  plainText: string,
+  rate: number,
+  signal?: AbortSignal,
+) => Promise<void>;
 
 export function createDefaultBrowserSpeaker(): SpeakWithBrowserFn {
   return async (plainText: string, rate: number, signal?: AbortSignal): Promise<void> => {
@@ -47,7 +113,6 @@ export function createDefaultBrowserSpeaker(): SpeakWithBrowserFn {
     const synth = globalThis.speechSynthesis;
     const voices = typeof synth.getVoices === 'function' ? synth.getVoices() : [];
     if (voices.length === 0) {
-      // Headless / Chrome for Testing environments without OS TTS voices resolve immediately without hanging.
       return;
     }
 
@@ -201,13 +266,11 @@ class BrowserSpeechFallbackTts implements TtsEngine {
 
   async synthesize(text: string, options?: TtsSynthOptions): Promise<TtsSynthResult> {
     const plan = compileEmotionPlan(text, 'strip');
-    const marker = new Uint8Array(1);
-    PENDING_SPEECH_TEXT.set(marker, plan.plainText);
     if (typeof options?.rate === 'number' && Number.isFinite(options.rate) && options.rate > 0) {
       this.rate = options.rate;
     }
     return {
-      audio: marker,
+      audio: UTF8_ENCODER.encode(plan.plainText),
       mime: SPEECH_SYNTHESIS_MIME,
     };
   }
@@ -221,23 +284,51 @@ class BrowserSpeechFallbackTts implements TtsEngine {
   }
 }
 
-class OfflineFallbackAsr implements AsrTransport {
+class UnconfiguredFallbackAsr implements AsrTransport {
   readonly kind = 'openai-compat' as const;
-  async start(): Promise<void> {}
-  pushAudio(): void {}
-  async finalize() {
-    return { text: '', isFinal: true, durationMs: 0 };
+  async start(): Promise<void> {
+    throw new Error(
+      'Local voice-daemon is offline; configure BYOK ASR in Side Panel or use browser SpeechRecognition dictation.',
+    );
   }
-  async transcribe(pcm16k: Float32Array, options?: { sampleRate?: number }) {
-    const sr = options?.sampleRate ?? 16_000;
-    return {
-      text: '',
-      isFinal: true,
-      durationMs: Math.round((pcm16k.length / sr) * 1000),
-    };
+  pushAudio(): void {}
+  async finalize(): Promise<never> {
+    throw new Error(
+      'Local voice-daemon is offline; configure BYOK ASR in Side Panel or use browser SpeechRecognition dictation.',
+    );
+  }
+  async transcribe(): Promise<never> {
+    throw new Error(
+      'Local voice-daemon is offline; configure BYOK ASR in Side Panel or use browser SpeechRecognition dictation.',
+    );
   }
   abort(): void {}
   async close(): Promise<void> {}
+}
+
+export interface SpeechRecognitionLike {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult:
+    | ((ev: {
+        resultIndex?: number;
+        results: ArrayLike<{ isFinal?: boolean; 0?: { transcript?: string } }>;
+      }) => void)
+    | null;
+  onerror: ((ev: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+  start(): void;
+  stop(): void;
+}
+
+export interface WebSpeechDictationOptions {
+  SpeechRecognitionCtor?: new () => SpeechRecognitionLike;
+  language?: string;
+  replacements?: ReadonlyArray<AsrReplacement>;
+  onFinalTranscript: (text: string) => void;
+  onStateChange?: (active: boolean) => void;
+  onError?: (err: Error) => void;
 }
 
 export interface VoiceExtensionCoordinatorOptions {
@@ -273,6 +364,7 @@ export class VoiceExtensionCoordinator {
   private readonly browserFallbackTts = new BrowserSpeechFallbackTts();
   private readonly speakBrowserFn: SpeakWithBrowserFn;
   private replacer: AsrReplacer;
+  private hasByokAsr = false;
   private readonly onFallbackHook?: (surface: 'asr' | 'tts', reason: string) => void;
   private readonly onErrorHook?: (message: string) => void;
 
@@ -315,12 +407,13 @@ export class VoiceExtensionCoordinator {
         })
       : this.browserFallbackTts;
 
+    this.hasByokAsr = Boolean(options.byokAsr);
     const fallbackAsr: AsrTransport = options.byokAsr
       ? new OpenAiCompatAsrTransport({
           fetchImpl: boundBrowserFetch,
           ...options.byokAsr,
         })
-      : new OfflineFallbackAsr();
+      : new UnconfiguredFallbackAsr();
 
     return new DaemonClient({
       baseUrl: options.daemonBaseUrl ?? DEFAULT_DAEMON_BASE_URL,
@@ -342,6 +435,10 @@ export class VoiceExtensionCoordinator {
         this.onFallbackHook?.(surface, safeReason);
       },
     });
+  }
+
+  hasConfiguredByokAsr(): boolean {
+    return this.hasByokAsr;
   }
 
   async reconfigure(options: VoiceExtensionCoordinatorOptions): Promise<void> {
@@ -369,27 +466,8 @@ export class VoiceExtensionCoordinator {
     return this.daemonClient.probeHealth();
   }
 
-  async synthesizeOnce(
-    text: string,
-    opts?: { voice?: string; rate?: number },
-  ): Promise<{ result: TtsSynthResult; usedFallback: boolean; elapsedMs: number }> {
-    this.lastFallbackSurface = null;
-    this.lastFallbackReason = null;
-    const t0 = performance.now();
-    const synthOpts: TtsSynthOptions = {};
-    if (opts?.voice !== undefined) synthOpts.voice = opts.voice;
-    if (opts?.rate !== undefined) synthOpts.rate = opts.rate;
-    const result = await this.daemonClient.tts.synthesize(text, synthOpts);
-    const elapsedMs = Math.round(performance.now() - t0);
-    return {
-      result,
-      usedFallback: this.lastFallbackSurface === 'tts',
-      elapsedMs,
-    };
-  }
-
   async playBrowserFallbackPayload(payload: TtsSynthResult, signal?: AbortSignal): Promise<void> {
-    const text = PENDING_SPEECH_TEXT.get(payload.audio) ?? '';
+    const text = UTF8_DECODER.decode(payload.audio).trim();
     if (!text) return;
     await this.speakBrowserFn(text, this.browserFallbackTts.getRate(), signal);
   }
@@ -455,6 +533,60 @@ export class VoiceExtensionCoordinator {
         hooks.onFinalTranscript?.(replaced, info);
       },
     });
+  }
+
+  startWebSpeechFallbackDictation(opts: WebSpeechDictationOptions): { stop(): void } {
+    const g = globalThis as unknown as {
+      SpeechRecognition?: new () => SpeechRecognitionLike;
+      webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+    };
+    const Ctor = opts.SpeechRecognitionCtor ?? g.SpeechRecognition ?? g.webkitSpeechRecognition;
+    if (!Ctor) {
+      throw new Error(
+        'Browser SpeechRecognition is unavailable; start local voice-daemon or configure BYOK ASR.',
+      );
+    }
+
+    const effectiveReplacer = opts.replacements
+      ? createAsrReplacer(opts.replacements)
+      : this.replacer;
+    const recognition = new Ctor();
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    if (opts.language) {
+      recognition.lang = opts.language;
+    }
+
+    recognition.onresult = (ev) => {
+      const startIdx = ev.resultIndex ?? 0;
+      for (let i = startIdx; i < ev.results.length; i += 1) {
+        const item = ev.results[i];
+        if (item?.isFinal === false) continue;
+        const raw = item?.[0]?.transcript?.trim() ?? '';
+        if (raw) {
+          opts.onFinalTranscript(effectiveReplacer(raw, true));
+        }
+      }
+    };
+    recognition.onerror = (ev) => {
+      opts.onError?.(new Error(`Browser SpeechRecognition error: ${ev.error ?? 'unknown'}`));
+    };
+    recognition.onend = () => {
+      opts.onStateChange?.(false);
+    };
+
+    opts.onStateChange?.(true);
+    recognition.start();
+
+    return {
+      stop() {
+        try {
+          recognition.stop();
+        } catch {
+          // Ignore teardown errors.
+        }
+      },
+    };
   }
 
   async dispose(): Promise<void> {

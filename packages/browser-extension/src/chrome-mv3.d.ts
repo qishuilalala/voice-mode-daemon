@@ -1,6 +1,8 @@
 declare namespace chrome {
   namespace runtime {
+    const id: string;
     interface MessageSender {
+      id?: string;
       tab?: { id?: number; url?: string };
     }
     const onInstalled: {

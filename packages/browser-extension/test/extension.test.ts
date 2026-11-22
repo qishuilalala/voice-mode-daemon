@@ -1,22 +1,23 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { encodeMonoPcm16Wav } from '@voice-mode/core';
+import { KOKORO_SPEAKERS_103, encodeMonoPcm16Wav } from '@voice-mode/core';
 import {
   SpeechEngineRegistry,
   startVoiceDaemonServer,
   type NativeSpeechBackend,
 } from '../../voice-daemon/dist/index.js';
-
-// Import through compiled/bundled extension coordinator public module
 import {
+  SPEECH_SYNTHESIS_MIME,
   VoiceExtensionCoordinator,
+  buildKokoroVoiceSelectOptions,
   extractReadableSelectionOrReply,
   injectDictatedTextIntoPage,
 } from '../src/coordinator.ts';
+import { dispatchServiceWorkerMessage } from '../src/sw-router.ts';
 
 function createMockDaemonBackend(): NativeSpeechBackend {
   return {
@@ -48,9 +49,75 @@ function createMockDaemonBackend(): NativeSpeechBackend {
   };
 }
 
-describe('MV3 browser-extension coordinator, Markdown reader, vocabulary replacer, and <1s fallback', () => {
+describe('MV3 browser-extension coordinator, sender security, 103-voice catalog, and <1s fallback', () => {
+  it('populates all 103 Kokoro voice options dynamically from daemon health.voices', () => {
+    const options = buildKokoroVoiceSelectOptions(KOKORO_SPEAKERS_103);
+    assert.equal(options.length, 103);
+    const values = new Set(options.map((o) => o.value));
+    assert.equal(values.size, 103);
+    assert.equal(values.has('zf_001'), true);
+    assert.equal(values.has('af_maple'), true);
+    assert.equal(values.has('zm_013'), true);
+    assert.equal(values.has('zm_100'), true);
+  });
+
+  it('rejects untrusted content-script or cross-extension senders in MV3 service worker router', async () => {
+    const ownId = 'ejfaegbinglhgllfphndcfbplacledop';
+    let tabQueried = false;
+
+    const fakeDeps = {
+      runtimeId: ownId,
+      async queryActiveTabId() {
+        tabQueried = true;
+        return 42;
+      },
+      async ensureContentScript() {},
+      async sendTabMessage() {
+        return { ok: true, text: 'secret' };
+      },
+    };
+
+    // 1. Sender from content script (sender.tab present) MUST be rejected!
+    let contentReply: unknown = null;
+    dispatchServiceWorkerMessage(
+      { type: 'VM_INJECT_ACTIVE_TAB', text: 'pwned' },
+      { id: ownId, tab: { id: 99, url: 'https://evil.example' } },
+      (res) => {
+        contentReply = res;
+      },
+      fakeDeps,
+    );
+    assert.deepEqual(contentReply, { ok: false, error: 'Forbidden message sender' });
+    assert.equal(tabQueried, false);
+
+    // 2. Sender from foreign extension ID MUST be rejected!
+    let foreignReply: unknown = null;
+    dispatchServiceWorkerMessage(
+      { type: 'VM_READ_ACTIVE_TAB' },
+      { id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
+      (res) => {
+        foreignReply = res;
+      },
+      fakeDeps,
+    );
+    assert.deepEqual(foreignReply, { ok: false, error: 'Forbidden message sender' });
+    assert.equal(tabQueried, false);
+
+    // 3. Sender from own Side Panel (sender.id === ownId && !sender.tab) succeeds
+    const sidePanelReply = await new Promise<unknown>((resolve) => {
+      dispatchServiceWorkerMessage(
+        { type: 'VM_READ_ACTIVE_TAB' },
+        { id: ownId },
+        (res) => resolve(res),
+        fakeDeps,
+      );
+    });
+    assert.deepEqual(sidePanelReply, { ok: true, text: 'secret' });
+    assert.equal(tabQueried, true);
+  });
+
   it('reads Markdown skipping code blocks and pipe tables via SentenceSegmenter and plays via voice-daemon', async () => {
-    const token = 'a'.repeat(64);
+    const token = `sk-vmd-${'a'.repeat(48)}`;
     const server = await startVoiceDaemonServer({
       port: 0,
       token,
@@ -102,7 +169,6 @@ describe('MV3 browser-extension coordinator, Markdown reader, vocabulary replace
       assert.ok(!playedSentences.join(' ').includes('列A'));
       assert.deepEqual(playedMimes, ['audio/wav', 'audio/wav']);
 
-      // Verify ASR transcription + createAsrReplacer vocabulary replacement
       coordinator.updateReplacements([{ from: ['deep seek'], to: 'DeepSeek' }]);
       const pcm = new Float32Array(4_000);
       pcm.fill(0.1);
@@ -116,8 +182,8 @@ describe('MV3 browser-extension coordinator, Markdown reader, vocabulary replace
     }
   });
 
-  it('automatically falls back to browser speechSynthesis / BYOK in < 1,000 ms when daemon goes offline', async () => {
-    const token = 'b'.repeat(64);
+  it('falls back in < 1,000 ms for TTS (speechSynthesis/BYOK) and ASR (BYOK/WebSpeech, never silent empty string)', async () => {
+    const token = `sk-vmd-${'b'.repeat(48)}`;
     const server = await startVoiceDaemonServer({
       port: 0,
       token,
@@ -128,7 +194,7 @@ describe('MV3 browser-extension coordinator, Markdown reader, vocabulary replace
     });
 
     const baseUrl = `http://127.0.0.1:${server.port}`;
-    await server.close(); // Daemon is now offline!
+    await server.close(); // Daemon is offline!
 
     const spokenBySystem: string[] = [];
     const coordinator = new VoiceExtensionCoordinator({
@@ -140,7 +206,7 @@ describe('MV3 browser-extension coordinator, Markdown reader, vocabulary replace
       },
       sink: {
         async play(payload) {
-          if (payload.mime === 'application/x-speech-synthesis') {
+          if (payload.mime === SPEECH_SYNTHESIS_MIME) {
             await coordinator.playBrowserFallbackPayload(payload);
           }
         },
@@ -156,13 +222,22 @@ describe('MV3 browser-extension coordinator, Markdown reader, vocabulary replace
     assert.deepEqual(spokenBySystem, ['Fallback sentence works.']);
     assert.equal(coordinator.lastFallbackSurface, 'tts');
 
-    // Also verify BYOK OpenAI-compat fallback returns real WAV audio in <1s
+    // Offline PCM ASR without BYOK must fail explicitly rather than silently returning ''
+    const pcm = new Float32Array(1_600);
+    pcm.fill(0.05);
+    await assert.rejects(
+      () => coordinator.transcribeAudio(pcm, 16_000),
+      /offline|BYOK|SpeechRecognition/i,
+    );
+
+    // Offline PCM ASR WITH BYOK OpenAiCompatAsrTransport falls back in < 1s and applies vocabulary replacer!
     const byokWav = encodeMonoPcm16Wav(new Float32Array(800), 24_000);
     const playedMimes: string[] = [];
     const byokCoordinator = new VoiceExtensionCoordinator({
       daemonBaseUrl: baseUrl,
       daemonToken: token,
       probeTimeoutMs: 500,
+      replacements: [{ from: ['deep seek'], to: 'DeepSeek' }],
       byokTts: {
         baseUrl: 'https://api.openai.com/v1',
         apiKey: 'sk-test-byok-placeholder',
@@ -175,6 +250,16 @@ describe('MV3 browser-extension coordinator, Markdown reader, vocabulary replace
             headers: { 'Content-Type': 'audio/wav' },
           }),
       },
+      byokAsr: {
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'sk-test-byok-placeholder',
+        model: 'whisper-1',
+        fetchImpl: async () =>
+          new Response(JSON.stringify({ text: 'hello deep seek cloud', language: 'en' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+      },
       sink: {
         async play(payload) {
           playedMimes.push(payload.mime);
@@ -185,8 +270,39 @@ describe('MV3 browser-extension coordinator, Markdown reader, vocabulary replace
     const tByok = performance.now();
     await byokCoordinator.readMarkdownAloud('Cloud fallback test.');
     await byokCoordinator.waitUntilPlaybackIdle();
+    const byokAsrTx = await byokCoordinator.transcribeAudio(pcm, 16_000);
     assert.ok(performance.now() - tByok < 1_000);
     assert.deepEqual(playedMimes, ['audio/wav']);
+    assert.equal(byokAsrTx.usedFallback, true);
+    assert.equal(byokAsrTx.replacedText, 'hello DeepSeek cloud');
+
+    // WebSpeech Recognition fallback session delivers vocabulary-replaced transcript
+    const webSpeechTranscripts: string[] = [];
+    class FakeSpeechRecognition {
+      continuous = false;
+      interimResults = false;
+      lang = '';
+      onresult: ((ev: unknown) => void) | null = null;
+      onerror: ((ev: unknown) => void) | null = null;
+      onend: (() => void) | null = null;
+      start() {
+        this.onresult?.({
+          resultIndex: 0,
+          results: [{ isFinal: true, 0: { transcript: 'ask deep seek now' } }],
+        });
+      }
+      stop() {
+        this.onend?.();
+      }
+    }
+
+    const handle = coordinator.startWebSpeechFallbackDictation({
+      SpeechRecognitionCtor: FakeSpeechRecognition as never,
+      replacements: [{ from: ['deep seek'], to: 'DeepSeek' }],
+      onFinalTranscript: (text) => webSpeechTranscripts.push(text),
+    });
+    assert.deepEqual(webSpeechTranscripts, ['ask DeepSeek now']);
+    handle.stop();
 
     await coordinator.dispose();
     await byokCoordinator.dispose();
@@ -231,10 +347,12 @@ describe('MV3 browser-extension coordinator, Markdown reader, vocabulary replace
     assert.equal(extracted, 'Selected Markdown paragraph');
   });
 
-  it('enforces strict MV3 manifest & bundle store gate (zero <all_urls>, *://*/*, eval, or Edge WebSocket)', () => {
+  it('enforces strict MV3 manifest & clean bundle store gate (zero <all_urls>, zero dead coordinator.js, zero debug globals)', () => {
     const pkgRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
     const repoRoot = resolve(pkgRoot, '..', '..');
     const distDir = join(pkgRoot, 'dist');
+
+    assert.equal(existsSync(join(distDir, 'coordinator.js')), false);
 
     const rawManifest = readFileSync(join(distDir, 'manifest.json'), 'utf8');
     const manifest = JSON.parse(rawManifest) as {
@@ -261,17 +379,22 @@ describe('MV3 browser-extension coordinator, Markdown reader, vocabulary replace
       assert.equal(/\beval\s*\(/.test(code), false);
       assert.equal(/\bnew\s+Function\s*\(/.test(code), false);
       assert.equal(/speech\.platform\.bing\.com/i.test(code), false);
+      assert.equal(code.includes('__voiceModeSidePanel'), false);
     }
 
-    const gateOutput = execFileSync(process.execPath, [join(repoRoot, 'scripts', 'check-release-gate.mjs')], {
-      cwd: repoRoot,
-      encoding: 'utf8',
-    });
+    const gateOutput = execFileSync(
+      process.execPath,
+      [join(repoRoot, 'scripts', 'check-release-gate.mjs')],
+      {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      },
+    );
     assert.match(gateOutput, /Release gate PASSED/);
   });
 
   it('binds globalThis.fetch safely when Window.prototype.fetch enforces WebIDL receiver branding', async () => {
-    const token = 'f'.repeat(64);
+    const token = `sk-vmd-${'f'.repeat(48)}`;
     const server = await startVoiceDaemonServer({
       port: 0,
       token,

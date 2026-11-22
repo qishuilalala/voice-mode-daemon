@@ -63,7 +63,6 @@ export interface VoiceDaemonServerOptions extends ModelCacheOptions {
   port?: number;
   token?: string;
   tokenPath?: string;
-  allowUnauthenticatedLoopback?: boolean;
   registry?: SpeechEngineRegistry;
 }
 
@@ -83,7 +82,6 @@ export async function startVoiceDaemonServer(
   }
 
   const requestedPort = options.port ?? DEFAULT_DAEMON_PORT;
-  const allowUnauth = options.allowUnauthenticatedLoopback ?? false;
   const token =
     options.token !== undefined && options.token.trim().length > 0
       ? options.token.trim()
@@ -97,7 +95,6 @@ export async function startVoiceDaemonServer(
     void handleRequest(req, res, {
       boundPort,
       expectedToken: token,
-      allowUnauthenticatedLoopback: allowUnauth,
       registry,
       cacheOptions: options,
     });
@@ -138,7 +135,6 @@ export async function startVoiceDaemonServer(
 interface RequestContext {
   boundPort: number;
   expectedToken: string;
-  allowUnauthenticatedLoopback: boolean;
   registry: SpeechEngineRegistry;
   cacheOptions: ModelCacheOptions;
 }
@@ -157,7 +153,6 @@ async function handleRequest(
       typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined,
     boundPort: ctx.boundPort,
     expectedToken: ctx.expectedToken,
-    allowUnauthenticatedLoopback: ctx.allowUnauthenticatedLoopback,
   });
 
   if (!guard.ok) {
