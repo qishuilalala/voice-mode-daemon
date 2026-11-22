@@ -1,0 +1,10 @@
+packages:
+  - "packages/*"
+
+overrides:
+  "@voice-mode/core": "file:./vendor/voice-mode-core-0.1.0.tgz"
+  "@voice-mode/browser": "file:./vendor/voice-mode-browser-0.1.0.tgz"
+
+allowBuilds:
+  esbuild: true
+  sherpa-onnx-node: true

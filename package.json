@@ -1,0 +1,28 @@
+{
+  "name": "voice-mode-daemon-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local loopback neural speech daemon (Kokoro 103 TTS + Zipformer2 & SenseVoice ASR) and Chrome/Edge Manifest V3 extension.",
+  "license": "MIT",
+  "packageManager": "pnpm@12.21.0",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit && pnpm -r run typecheck",
+    "lint": "eslint --max-warnings 0 .",
+    "test": "pnpm -r run test",
+    "check:release-gate": "node scripts/check-release-gate.mjs",
+    "check:all": "pnpm run build && pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run check:release-gate"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.22.0",
+    "@types/node": "^22.13.10",
+    "esbuild": "^0.25.1",
+    "eslint": "^9.22.0",
+    "typescript": "^5.8.2",
+    "typescript-eslint": "^8.26.1"
+  }
+}
