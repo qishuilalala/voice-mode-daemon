@@ -4,6 +4,8 @@
 
 Native Node.js loopback speech acceleration daemon (`@voice-mode/daemon`) and Chrome / Edge Manifest V3 extension (`@voice-mode/browser-extension`) for the **Voice Mode** ecosystem.
 
+> **Positioning: developer-only optional backend.** This repository is the power-user / developer option, not a store product: it ships no installer, is not submitted to the Chrome/Edge stores, and expects you to run it from source (Node.js `>= 22.18.0`, pnpm `12.21.0`, `pnpm run build`, `voice-daemon models download`). `obsidian-voice-mode` and `sillytavern-voice-mode` use it as an optional `kokoro-daemon` backend for better local voices and recognition; both plugins keep working without it.
+
 ## Highlights
 
 - **Bypasses V8 Memory Cage & WASM Ceilings**: Runs `Kokoro v1.1` (`103` multilingual speakers, `24 kHz`), `Streaming Zipformer2` (`zh`/`en`), and `SenseVoice Small int8` (`zh`/`en`/`ja`/`ko`/`yue`) natively via `sherpa-onnx-node` outside Electron and browser tab sandboxes.

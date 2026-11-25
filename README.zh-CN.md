@@ -4,6 +4,8 @@
 
 Voice Mode Daemon 在电脑上运行语音模型，为浏览器扩展、Obsidian 和 SillyTavern 等宿主提供本地朗读和听写。本仓库包含 Node.js 守护进程（`@voice-mode/daemon`）及 Chrome / Edge Manifest V3 侧边栏扩展（`@voice-mode/browser-extension`）。
 
+> **定位：面向开发者与高阶用户的可选后端。** 本仓库不提供安装包，也不上架 Chrome / Edge 商店，需要从源码构建运行（Node.js `>= 22.18.0`、pnpm `12.21.0`、`pnpm run build`、`voice-daemon models download`）。`obsidian-voice-mode` 与 `sillytavern-voice-mode` 将它作为可选的 `kokoro-daemon` 后端，以获得更好的本地音色与识别；不安装它，两个插件仍可正常使用。
+
 ## 核心功能
 
 - **本地语音模型。** 通过原生 `sherpa-onnx-node` 运行 Kokoro v1.1（103 款音色，24 kHz）、Streaming Zipformer2（中英双语识别）和 SenseVoice Small int8（中、英、日、韩、粤语识别）。
