@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
+import { rmSync, statSync, readdirSync } from 'node:fs';
+import { join, sep } from 'node:path';
 import { redactSecrets } from '@voice-mode/core';
 import {
   DAEMON_MODEL_BUNDLES,
+  defaultModelCacheDir,
   downloadModelBundle,
   inspectModelCache,
   type DaemonBundleId,
@@ -24,6 +27,7 @@ function printHelp(): void {
       '  voice-daemon [serve] [--port 18790] [--token-file <path>] [--cache-dir <dir>]',
       '  voice-daemon models status [--cache-dir <dir>] [--json]',
       '  voice-daemon models download [kokoro-int8|zipformer2|sensevoice-int8|all] [--cache-dir <dir>] [--mirror <https-url>]',
+      '  voice-daemon models clean [--yes] [--cache-dir <dir>]',
       '  voice-daemon token-path [--token-file <path>]',
       '',
     ].join('\n'),
@@ -44,6 +48,7 @@ async function main(): Promise<void> {
       'cache-dir': { type: 'string' },
       mirror: { type: 'string' },
       json: { type: 'boolean' },
+      yes: { type: 'boolean' },
     },
   });
 
@@ -68,6 +73,55 @@ async function main(): Promise<void> {
   if (cmd === 'models') {
     const sub = positionals[1] ?? 'status';
     const cacheOpts = values['cache-dir'] ? { cacheDir: values['cache-dir'] } : {};
+
+    if (sub === 'clean') {
+      const root = values['cache-dir'] ?? defaultModelCacheDir();
+      const statuses = await inspectModelCache(cacheOpts);
+      const installed = statuses.filter((s) => s.installed && s.dir);
+      if (installed.length === 0) {
+        process.stdout.write('Nothing to clean: no installed model bundles found.\n');
+        return;
+      }
+      const rootPrefix = root.endsWith(sep) ? root : root + sep;
+      const dirSize = (dir: string): number => {
+        let total = 0;
+        for (const entry of readdirSync(dir)) {
+          const full = join(dir, entry);
+          const info = statSync(full);
+          total += info.isDirectory() ? dirSize(full) : info.size;
+        }
+        return total;
+      };
+      const targets = installed
+        .map((s) => s.dir as string)
+        .filter((dir) => dir.startsWith(rootPrefix));
+      const skipped = installed.length - targets.length;
+      const totalBytes = targets.reduce((sum, dir) => sum + dirSize(dir), 0);
+      if (targets.length === 0) {
+        process.stdout.write(
+          `No installed bundles under the primary cache dir (${root}); ${skipped} bundle dir(s) live in fallback locations (shared with other products) and are not removed.\n`,
+        );
+        return;
+      }
+      if (!values.yes) {
+        process.stdout.write(
+          `Would remove ${targets.length} bundle dir(s), ${totalBytes} bytes (cache: ${root}):\n`,
+        );
+        for (const dir of targets) {
+          process.stdout.write(`  ${dir}\n`);
+        }
+        if (skipped > 0) {
+          process.stdout.write(`Skipped ${skipped} dir(s) outside the cache root.\n`);
+        }
+        process.stdout.write('Re-run with --yes to delete these files.\n');
+        return;
+      }
+      for (const dir of targets) {
+        rmSync(dir, { recursive: true, force: true });
+      }
+      process.stdout.write(`Removed ${targets.length} bundle dir(s), ${totalBytes} bytes.\n`);
+      return;
+    }
 
     if (sub === 'status') {
       const statuses = await inspectModelCache(cacheOpts);
