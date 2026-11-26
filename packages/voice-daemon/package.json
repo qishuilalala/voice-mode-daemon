@@ -8,7 +8,8 @@
     "node": ">=22.18.0"
   },
   "bin": {
-    "voice-daemon": "./dist/cli.js"
+    "voice-daemon": "./dist/cli.js",
+    "voice-daemon-mcp": "dist/mcp-server.js"
   },
   "exports": {
     ".": {
@@ -23,12 +24,15 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm run build && node --test test/security.test.ts test/model-cache.test.ts test/native-addon.test.ts test/server.test.ts test/cli.test.ts"
+    "test": "pnpm run build && node --test test/security.test.ts test/model-cache.test.ts test/native-addon.test.ts test/server.test.ts test/cli.test.ts test/mcp-server.test.ts",
+    "mcp": "node dist/mcp-server.js"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@voice-mode/core": "file:../../vendor/voice-mode-core-0.1.0.tgz",
     "sherpa-onnx-node": "1.13.6",
-    "ws": "^8.23.0"
+    "ws": "^8.23.0",
+    "zod": "^4.6.7"
   },
   "repository": {
     "type": "git",

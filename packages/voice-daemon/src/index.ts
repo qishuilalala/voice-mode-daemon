@@ -55,3 +55,10 @@ export {
   type VoiceDaemonServerHandle,
   type VoiceDaemonServerOptions,
 } from './server.js';
+
+export {
+  createVoiceMcpHandlers,
+  createVoiceMcpServer,
+  type McpDaemonConfig,
+  type VoiceMcpHandlers,
+} from './mcp-server.js';

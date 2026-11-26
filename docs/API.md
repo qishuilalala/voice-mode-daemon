@@ -132,3 +132,26 @@ Node 无依赖示例见 [`examples/node-client.mjs`](../examples/node-client.mjs
 - `0.1.x` 内：URL、必填字段、响应主字段（`ok`/`text`/`audio`）稳定；新增字段只增不删。
 - 破坏性变更：升 major（`0.2.0`）并在 CHANGELOG 说明。
 - 本服务是 **developer-only 可选后端**，不承诺 SLA；请勿暴露到公网（仅回环监听 + 回环 Host 校验）。
+
+## 5. MCP 工具集（P1-5 / P2-5）
+
+`voice-daemon-mcp` 以 **stdio MCP server** 形式把 daemon 能力暴露给 MCP 宿主（dsh / Claude 等）：
+
+```bash
+# 需要 daemon 已运行；令牌默认从 token-path 读取，也可用 VOICE_MODE_TOKEN 覆盖
+node packages/voice-daemon/dist/mcp-server.js
+```
+
+| 工具 | 说明 | 返回 |
+| --- | --- | --- |
+| `voice_health` | 查询 daemon 状态（版本/音色/健康） | JSON 文本 |
+| `voice_speak` | 文本 → 24kHz WAV 语音 | `text` + `audio/wav` 内容 |
+| `voice_transcribe` | 本地 16kHz PCM16 WAV → 文本（zipformer2/sensevoice） | JSON 文本 |
+
+环境变量：`VOICE_MODE_BASE`（默认 `http://127.0.0.1:18790`）、`VOICE_MODE_TOKEN` / `VOICE_MODE_TOKEN_PATH`。
+
+MCP 宿主配置示例（dsh / Claude Desktop 的 stdio server 配置）：
+
+```json
+{ "mcpServers": { "voice-mode": { "command": "node", "args": ["/path/to/voice-daemon/packages/voice-daemon/dist/mcp-server.js"] } } }
+```

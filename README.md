@@ -74,7 +74,7 @@ node packages/voice-daemon/dist/cli.js token-path
 | `POST /v1/audio/speech` | 接收含 `input`、`voice`、`speed` 的 JSON，返回 24 kHz PCM16 WAV |
 | `POST /v1/audio/transcriptions` | 接收 `multipart/form-data` 中的 WAV `file` 和 `model`（`zipformer2` 或 `sensevoice`），返回 `text`、`language`、`durationMs` |
 
-完整 HTTP 契约（鉴权/Host/Origin、请求/响应/错误码、curl 与 Node 示例）见 [docs/API.md](./docs/API.md)，示例代码在 [`examples/`](./examples)。
+完整 HTTP 契约（鉴权/Host/Origin、请求/响应/错误码、curl 与 Node 示例）见 [docs/API.md](./docs/API.md)，示例代码在 [`examples/`](./examples)。MCP 工具集（`voice_health` / `voice_speak` / `voice_transcribe`）见 docs/API.md §5，以 stdio MCP server 形式供 dsh / Claude 等宿主调用。
 
 ## 开发与验证
 
