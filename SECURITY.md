@@ -14,6 +14,10 @@
    - First run generates an `sk-vmd-` prefixed random hex token at `~/.cache/voice-mode/daemon.token` with `0o600` permissions (rotating unprefixed legacy tokens and tightening existing permissive modes on startup so `@voice-mode/core` `redactSecrets` automatically scrubs any accidental log output).
    - Incoming tokens are hashed with SHA-256 and compared via `crypto.timingSafeEqual` so neither character prefixes nor token lengths leak via response timing.
 
+## Telemetry & Startup Network
+
+**Zero telemetry**: voice-daemon collects no usage statistics, crash reports, or analytics. It makes **no network requests at startup**; the only outbound traffic is model bundle download (allowlisted hosts, SHA-256 verified) triggered explicitly by the user. All runtime audio/text traffic stays on the loopback interface.
+
 ## Model Integrity & License Isolation
 
 - Model bundles (`kokoro-int8`, `zipformer2`, `sensevoice-int8`) pin immutable 40-hex commit SHAs and are verified via hop-by-hop redirect allowlisting, stream byte caps, and SHA-256 digests before atomic installation into `~/.cache/voice-mode/models/`.
