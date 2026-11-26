@@ -2,7 +2,7 @@
 
 Monorepo housing the native Node.js loopback speech daemon (`@voice-mode/daemon`) and the Chrome/Edge Manifest V3 companion extension (`@voice-mode/browser-extension`). Built to bypass Electron V8 Memory Cage and browser WASM ceilings while sharing **1 disk cache + 1 resident RAM instance** across Obsidian, SillyTavern, and browser tabs.
 
-中文用户从 [README.zh-CN.md](./README.zh-CN.md) 开始。守护进程负责本地认证、模型缓存和推理。侧边栏负责设置、朗读和听写，服务工作线程协调当前标签页上的内容脚本。
+中文用户从 [README.md](./README.md)（中文为主）开始；英文见 [README.en.md](./README.en.md)。守护进程负责本地认证、模型缓存和推理。侧边栏负责设置、朗读和听写，服务工作线程协调当前标签页上的内容脚本。
 
 ## Workspace Layout
 
