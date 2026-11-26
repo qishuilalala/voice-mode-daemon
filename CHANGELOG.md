@@ -9,6 +9,8 @@ All notable changes to `voice-mode-daemon` are documented in this file.
 - **Zero-telemetry statement**: SECURITY.md now states explicitly that the daemon collects no telemetry and makes no network requests at startup.
 - Added Simplified Chinese to the MV3 Side Panel and toolbar, alongside the default English locale.
 - Documented local setup, connection troubleshooting, and fallback behavior in the Chinese README.
+- **`voice-daemon models clean [--yes]`**: disk cache cleanup — previews the bundle dirs and bytes under the primary cache dir; `--yes` deletes them. Fallback locations shared with other products are reported but never removed.
+- **`voice-daemon token-path`**: prints the 192-bit Bearer token file path for scripting and troubleshooting.
 
 ## [0.1.0] - 2026-11-22
 
