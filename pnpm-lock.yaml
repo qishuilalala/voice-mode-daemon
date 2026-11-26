@@ -544,7 +544,7 @@ packages:
     version: 0.1.0
 
   '@voice-mode/core@file:vendor/voice-mode-core-0.1.0.tgz':
-    resolution: {integrity: sha512-h733uWAZU5JAb5lyBB5UAtPDy29hz+/4/8+gHJx52xakwOLb5asH4TKe3tL/2lij0+HoMNqD0XsEuA4G4tV6qg==, tarball: file:vendor/voice-mode-core-0.1.0.tgz}
+    resolution: {integrity: sha512-c4DujstKfTVTI/0hZB3DS7khcmHq7ekTbxPjlvilrqBQwwstsgd6uyHDtZhBcFM5V24yewQE4pXgnvJlN44VFg==, tarball: file:vendor/voice-mode-core-0.1.0.tgz}
     version: 0.1.0
 
   accepts@2.0.0:
