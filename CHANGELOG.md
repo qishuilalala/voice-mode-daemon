@@ -11,6 +11,10 @@ All notable changes to `voice-mode-daemon` are documented in this file.
 - Documented local setup, connection troubleshooting, and fallback behavior in the Chinese README.
 - **`voice-daemon models clean [--yes]`**: disk cache cleanup — previews the bundle dirs and bytes under the primary cache dir; `--yes` deletes them. Fallback locations shared with other products are reported but never removed.
 - **`voice-daemon token-path`**: prints the 192-bit Bearer token file path for scripting and troubleshooting.
+- **Streaming ASR over WebSocket (P1-5)**: `WS /v1/audio/transcriptions/stream` accepts PCM16LE@16kHz binary frames and returns `ready` / `partial` (incremental text) / `final` frames; `{"type":"stop"}` finalizes. Reuses loopback Host/Origin/Bearer checks (`?token=` for browsers), 60 s idle timeout, one OnlineRecognizer stream per connection.
+- **MCP toolset (P1-5 / P2-5)**: `voice-daemon-mcp` (stdio MCP server, `@modelcontextprotocol/sdk`) exposes `voice_health`, `voice_speak` (audio content) and `voice_transcribe` to MCP hosts such as dsh or Claude.
+- **API contract docs & examples**: `docs/API.md` documents every endpoint, error code and the WS protocol; `examples/quickstart.sh`, `examples/node-client.mjs` and `examples/ws-streaming.mjs` are runnable.
+- **Streaming client in shared core**: `DaemonStreamTranscriber` (zero-dependency, structural WebSocket types) connects, pushes PCM16 and resolves the final transcript.
 
 ## [0.1.0] - 2026-11-22
 
