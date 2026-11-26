@@ -31,6 +31,8 @@ node packages/voice-daemon/dist/cli.js models status
 
 # 下载模型包并校验 SHA-256（可选 --mirror https://hf-mirror.com）
 node packages/voice-daemon/dist/cli.js models download all
+# 预览并清理本地模型缓存（仅删主缓存目录内的 bundle；--yes 才实际删除）
+node packages/voice-daemon/dist/cli.js models clean
 
 # 启动守护进程（默认 127.0.0.1:18790，保持此终端运行）
 node packages/voice-daemon/dist/cli.js serve

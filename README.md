@@ -30,6 +30,8 @@ node packages/voice-daemon/dist/cli.js models status
 
 # Download missing SHA-256 verified model bundles (optional --mirror https://hf-mirror.com)
 node packages/voice-daemon/dist/cli.js models download all
+# Preview/clean the local model cache (primary cache dir only; --yes deletes)
+node packages/voice-daemon/dist/cli.js models clean
 
 # Start the daemon on 127.0.0.1:18790 and leave this terminal running
 node packages/voice-daemon/dist/cli.js serve
