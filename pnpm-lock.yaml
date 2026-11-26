@@ -512,7 +512,7 @@ packages:
     version: 0.1.0
 
   '@voice-mode/core@file:vendor/voice-mode-core-0.1.0.tgz':
-    resolution: {integrity: sha512-fJwVKcprminYyXugLcWBRwTsm3YNrExpSlUq7wo7U6u3QJe6tJNGIrWdFWnw74+VEjiH7vmu30Xg9KfRR6Hvig==, tarball: file:vendor/voice-mode-core-0.1.0.tgz}
+    resolution: {integrity: sha512-mZFqMvJKKO03TleAT1a8i8X99sT9WczzUxI1dOY9IEhB8/Wx/ei8A7e74z1y24SykPeNFh6B7Bzm85jywbL44g==, tarball: file:vendor/voice-mode-core-0.1.0.tgz}
     version: 0.1.0
 
   acorn-jsx@5.3.2:
