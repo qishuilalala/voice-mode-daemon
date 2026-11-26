@@ -7,7 +7,7 @@ Monorepo housing the native Node.js loopback speech daemon (`@voice-mode/daemon`
 ## Workspace Layout
 
 - `vendor/` — Pinned tarballs `@voice-mode/core@0.1.0` and `@voice-mode/browser@0.1.0` (shared wire contracts, `DaemonClient`, `SentenceSegmenter`, `compileEmotionPlan`, `createAsrReplacer`, `PlaybackQueue`, `CloudDictationSession`, `FocusTextInjector`).
-- `packages/voice-daemon/` — `@voice-mode/daemon@0.1.0` (`voice-daemon` CLI & loopback HTTP server on `127.0.0.1:18790` backed by `sherpa-onnx-node@1.13.6`).
+- `packages/voice-daemon/` — `@voice-mode/daemon@0.1.0` (`voice-daemon` CLI & loopback HTTP server on `127.0.0.1:18790` backed by `sherpa-onnx-node@1.13.6`); also exposes **WebSocket streaming ASR** (`/v1/audio/transcriptions/stream`) and a **stdio MCP server** (`voice-daemon-mcp`); API contract in [`docs/API.md`](./docs/API.md).
   - `src/security.ts` — Loopback `Host` guard, `Origin` allowlist, `0o600` token store, `timingSafeEqual` Bearer check.
   - `src/model-cache.ts` — SHA-256 verified downloader for `~/.cache/voice-mode/models/` with read-only fallback discovery of `~/.cache/dsh-voice-mode/models/` and runtime-only GPL-3.0 `espeak-ng-data` notice.
   - `src/engine-registry.ts` — Lazy deduplicated single-instance `Kokoro 103` (`24 kHz`), `Streaming Zipformer2`, and `SenseVoice int8` registry with `<whisper>` ×0.5 gain and `<break Nms>` silence synthesis.
