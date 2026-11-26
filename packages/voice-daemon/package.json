@@ -26,7 +26,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "pnpm run build && node --test test/security.test.ts test/model-cache.test.ts test/native-addon.test.ts test/server.test.ts test/cli.test.ts test/mcp-server.test.ts",
     "mcp": "node dist/mcp-server.js",
-    "verify:mcp": "node scripts/verify-mcp.mjs"
+    "verify:mcp": "node scripts/verify-mcp.mjs",
+    "check:api-doc": "node scripts/check-api-doc.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",

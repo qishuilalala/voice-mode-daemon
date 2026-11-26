@@ -44,6 +44,10 @@ jobs:
         if: runner.os == 'Linux'
         run: pnpm run verify:mcp
 
+      - name: API contract vs docs/API.md
+        if: runner.os == 'Linux'
+        run: pnpm run check:api-doc
+
   audit:
     name: Security Audit
     runs-on: ubuntu-latest
