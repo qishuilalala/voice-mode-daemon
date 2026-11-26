@@ -4,6 +4,9 @@ All notable changes to `voice-mode-daemon` are documented in this file.
 
 ## [Unreleased]
 
+- **OpenAI-compatible hardening**: `GET /v1/models`, `GET /v1/capabilities` (expression capability contract, `wav`/`pcm`, limits), structured error bodies `{ error: { message, type, code } }`, and `response_format=wav|pcm` on `POST /v1/audio/speech` (PCM returns headerless 16-bit LE samples).
+- **Expression capability contract (E1)** and **scoped expression tags (E2)** are now available from the synchronized shared core (`<slow>`, `<fast>`, `<spell>`, `<volume>`, `<pitch>`, `<emotion:NAME>`).
+- **Zero-telemetry statement**: SECURITY.md now states explicitly that the daemon collects no telemetry and makes no network requests at startup.
 - Added Simplified Chinese to the MV3 Side Panel and toolbar, alongside the default English locale.
 - Documented local setup, connection troubleshooting, and fallback behavior in the Chinese README.
 
