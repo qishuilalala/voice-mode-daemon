@@ -76,8 +76,8 @@ OpenAI 兼容的模型清单（`object: "list"` / `data[]`），供宿主枚举�
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `input` | string | 是 | 待合成文本（trim 后非空；长度上限见 `MAX_TTS_INPUT_CHARS`） |
-| `voice` | string | 否 | Kokoro 说话人（`zf_xiaobei` 等，103 个；缺省用默认音色） |
-| `speed` | number | 否 | 语速倍率 |
+| `voice` | string | 否 | Kokoro 说话人：名称（`zf_xiaobei`、`af_maple` 等 103 个）或数字 sid（`0`–`102`）。空/无效/未知值回退到默认 sid `3`（`zf_001`） |
+| `speed` | number | 否 | 语速倍率，clamp 到 `0.5`–`2.0`；非数字/≤0 时按 `1.0` |
 | `response_format` | `"wav"` \| `"pcm"` | 否 | 默认 `wav`（24 kHz PCM16）；`pcm` 为无头部裸 16-bit LE 样本 |
 
 响应：`200` + `audio/wav`（RIFF，24 kHz）或 `audio/pcm`（`audio/pcm` MIME）。
