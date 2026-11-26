@@ -66,6 +66,9 @@ Authenticate each endpoint with `Authorization: Bearer <token>`.
 - `GET /v1/models/status` — Reports which model bundles are available in the disk cache.
 - `POST /v1/audio/speech` — Accepts `{ input, voice, speed, response_format: "wav" }` (`af_maple`, `af_sol`, `bf_vale`, `zf_001`..`zm_100`, `zf_xiaobei`, `0..102`, `<whisper>` ×0.5 gain, `<break Nms>` silence) and returns `24 kHz` PCM16 RIFF WAV.
 - `POST /v1/audio/transcriptions` — Accepts RFC 7578 `multipart/form-data` (`file` WAV + `model: "zipformer2" | "sensevoice"`) and returns `{ text, language, durationMs }`.
+- `WS /v1/audio/transcriptions/stream` — Streaming ASR over WebSocket: send binary PCM16LE@16k frames and receive `ready` / `partial` / `final` JSON frames; `{"type":"stop"}` finalizes (browser WebSocket may authenticate with `?token=`).
+
+Streaming transcription is also available over **WebSocket** (see above); the full contract (auth / Host / Origin, request/response fields, error codes, curl + Node examples, MCP tools) is in [docs/API.md](./docs/API.md).
 
 ## Verification
 
