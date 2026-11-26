@@ -1,0 +1,40 @@
+name: Feature Request
+description: Suggest an improvement for Voice Mode Daemon.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This project is a developer-only optional backend. Please keep requests within the daemon's scope (loopback speech API; no cloud accounts, no telemetry).
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / use case
+      description: What are you trying to do? What blocks you today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: API shape, CLI flag, or behavior you would expect.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope confirmation
+      options:
+        - label: This request keeps the daemon loopback-only and telemetry-free.
+          required: true

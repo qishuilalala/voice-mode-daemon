@@ -1,0 +1,90 @@
+name: Bug Report
+description: Report a reproducible bug in Voice Mode Daemon (or the MV3 extension).
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a bug! Please remove any API keys, auth headers, private audio, or personal paths before submitting.
+        For security vulnerabilities, use **Security → Report a vulnerability** instead of a public issue.
+
+  - type: input
+    id: daemon_version
+    attributes:
+      label: Voice Mode Daemon version
+      description: Output of `voice-daemon --version` (or the `version` field of `GET /v1/health`).
+      placeholder: e.g. 0.1.0
+    validations:
+      required: true
+
+  - type: input
+    id: node_version
+    attributes:
+      label: Node.js version
+      placeholder: e.g. v22.18.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Operating system / platform
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows (x64)
+        - Windows (ARM64)
+        - Linux (x64)
+        - Linux (ARM64)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which surface is affected?
+      options:
+        - Local HTTP API (`/v1/*`)
+        - WebSocket streaming transcription
+        - Chrome / Edge MV3 extension
+        - CLI (`voice-daemon ...`)
+        - Model download / cache
+    validations:
+      required: true
+
+  - type: textarea
+    id: model_status
+    attributes:
+      label: Model status
+      description: Paste the sanitized output of `voice-daemon models status` (no tokens or private paths).
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start the daemon with ...
+        2. Call `/v1/...` with ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_actual
+    attributes:
+      label: Expected vs. actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs or error bodies
+      description: Do NOT paste tokens, API keys, auth headers, or private audio.
+      render: text
+    validations:
+      required: false

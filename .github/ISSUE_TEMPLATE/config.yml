@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/qishuilalala/voice-mode-daemon/security/advisories/new
+    about: Please report security issues privately via GitHub Security Advisories.
+  - name: Full API contract
+    url: https://github.com/qishuilalala/voice-mode-daemon/blob/main/docs/API.md
+    about: Endpoint/field/error reference and runnable examples.
