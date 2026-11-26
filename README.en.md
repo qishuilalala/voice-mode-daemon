@@ -1,5 +1,7 @@
 # Voice Mode Daemon
 
+[![CI](https://github.com/qishuilalala/voice-mode-daemon/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/qishuilalala/voice-mode-daemon/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/github/license/qishuilalala/voice-mode-daemon?style=flat-square)](LICENSE)
+
 [简体中文](./README.md) | **English**
 
 Native Node.js loopback speech acceleration daemon (`@voice-mode/daemon`) and Chrome / Edge Manifest V3 extension (`@voice-mode/browser-extension`) for the **Voice Mode** ecosystem.

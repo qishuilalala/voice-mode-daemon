@@ -1,5 +1,7 @@
 # Voice Mode Daemon（本地语音守护进程与浏览器扩展）
 
+[![CI](https://github.com/qishuilalala/voice-mode-daemon/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/qishuilalala/voice-mode-daemon/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/github/license/qishuilalala/voice-mode-daemon?style=flat-square)](LICENSE)
+
 **简体中文** | [English](./README.en.md)
 
 Voice Mode Daemon 在电脑上运行语音模型，为浏览器扩展、Obsidian 和 SillyTavern 等宿主提供本地朗读和听写。本仓库包含 Node.js 守护进程（`@voice-mode/daemon`）及 Chrome / Edge Manifest V3 侧边栏扩展（`@voice-mode/browser-extension`）。
