@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { MAX_ASR_AUDIO_BYTES, redactSecrets } from '@voice-mode/core';
+import { EXPRESSION_CAPS, MAX_ASR_AUDIO_BYTES, redactSecrets } from '@voice-mode/core';
 import {
   KOKORO_EXPOSED_VOICES,
   ModelNotInstalledError,
@@ -56,6 +56,41 @@ function sendJson(
     ...extraHeaders,
   });
   res.end(body);
+}
+
+type ErrorType = 'invalid_request_error' | 'authentication_error' | 'server_error';
+
+function sendError(
+  res: ServerResponse,
+  status: number,
+  message: string,
+  code: string,
+  extraHeaders: Record<string, string> = {},
+): void {
+  const type: ErrorType =
+    status === 400 || status === 404 || status === 413
+      ? 'invalid_request_error'
+      : status === 401 || status === 403
+        ? 'authentication_error'
+        : 'server_error';
+  sendJson(res, status, { error: { message, type, code } }, extraHeaders);
+}
+
+/** Extract the raw PCM payload from a RIFF/WAVE container produced by the registry. */
+function extractWavDataChunk(wav: Uint8Array): Uint8Array {
+  for (let i = 12; i + 8 <= wav.byteLength; i++) {
+    if (wav[i] === 0x64 && wav[i + 1] === 0x61 && wav[i + 2] === 0x74 && wav[i + 3] === 0x61) {
+      const size =
+        ((wav[i + 4] ?? 0) |
+          ((wav[i + 5] ?? 0) << 8) |
+          ((wav[i + 6] ?? 0) << 16) |
+          ((wav[i + 7] ?? 0) << 24)) >>>
+        0;
+      const start = i + 8;
+      return wav.subarray(start, Math.min(wav.byteLength, start + size));
+    }
+  }
+  throw new Error('WAV data chunk not found');
 }
 
 export interface VoiceDaemonServerOptions extends ModelCacheOptions {
@@ -156,7 +191,7 @@ async function handleRequest(
   });
 
   if (!guard.ok) {
-    sendJson(res, guard.status, { error: { message: guard.error } }, guard.headers);
+    sendError(res, guard.status, guard.error, 'unauthorized', guard.headers);
     return;
   }
 
@@ -200,6 +235,75 @@ async function handleRequest(
       return;
     }
 
+    if (method === 'GET' && pathname === '/v1/models') {
+      sendJson(
+        res,
+        200,
+        {
+          ok: true,
+          object: 'list',
+          data: [
+            {
+              id: 'kokoro-int8',
+              object: 'model',
+              owned_by: 'voice-daemon',
+              capabilities: ['tts'],
+              voices: KOKORO_EXPOSED_VOICES,
+            },
+            {
+              id: 'zipformer2',
+              object: 'model',
+              owned_by: 'voice-daemon',
+              capabilities: ['asr'],
+            },
+            {
+              id: 'sensevoice',
+              object: 'model',
+              owned_by: 'voice-daemon',
+              capabilities: ['asr'],
+            },
+          ],
+        },
+        corsHeaders,
+      );
+      return;
+    }
+
+    if (method === 'GET' && pathname === '/v1/capabilities') {
+      sendJson(
+        res,
+        200,
+        {
+          ok: true,
+          service: 'voice-daemon',
+          version: DAEMON_VERSION,
+          tts: {
+            engines: [
+              {
+                id: 'kokoro',
+                model: 'kokoro-int8',
+                voices: KOKORO_EXPOSED_VOICES,
+                responseFormats: ['wav', 'pcm'],
+                expression: EXPRESSION_CAPS['kokoro-daemon'],
+              },
+            ],
+          },
+          asr: {
+            engines: [
+              { id: 'zipformer2', responseFormats: ['json', 'text'] },
+              { id: 'sensevoice', responseFormats: ['json', 'text'] },
+            ],
+          },
+          limits: {
+            maxTtsInputChars: MAX_TTS_INPUT_CHARS,
+            maxAsrAudioBytes: MAX_ASR_AUDIO_BYTES,
+          },
+        },
+        corsHeaders,
+      );
+      return;
+    }
+
     if (method === 'POST' && pathname === '/v1/audio/speech') {
       const rawBody = await readBoundedRequestBody(req, MAX_JSON_BODY_BYTES);
       let parsed: Record<string, unknown>;
@@ -210,27 +314,17 @@ async function handleRequest(
         }
         parsed = json as Record<string, unknown>;
       } catch (err) {
-        sendJson(
-          res,
-          400,
-          { error: { message: err instanceof Error ? err.message : 'Malformed JSON body' } },
-          corsHeaders,
-        );
+        sendError(res, 400, err instanceof Error ? err.message : 'Malformed JSON body', 'malformed_json', corsHeaders);
         return;
       }
 
       const inputText = typeof parsed.input === 'string' ? parsed.input.trim() : '';
       if (!inputText) {
-        sendJson(res, 400, { error: { message: 'Missing non-empty "input" field' } }, corsHeaders);
+        sendError(res, 400, 'Missing non-empty "input" field', 'missing_input', corsHeaders);
         return;
       }
       if (inputText.length > MAX_TTS_INPUT_CHARS) {
-        sendJson(
-          res,
-          413,
-          { error: { message: `Input exceeds ${MAX_TTS_INPUT_CHARS} character limit` } },
-          corsHeaders,
-        );
+        sendError(res, 413, `Input exceeds ${MAX_TTS_INPUT_CHARS} character limit`, 'input_too_long', corsHeaders);
         return;
       }
 
@@ -238,11 +332,12 @@ async function handleRequest(
         typeof parsed.response_format === 'string'
           ? parsed.response_format.trim().toLowerCase()
           : 'wav';
-      if (format !== 'wav') {
-        sendJson(
+      if (format !== 'wav' && format !== 'pcm') {
+        sendError(
           res,
           400,
-          { error: { message: 'Only response_format="wav" is supported by voice-daemon' } },
+          `Unsupported response_format "${format}"; use "wav" or "pcm"`,
+          'unsupported_response_format',
           corsHeaders,
         );
         return;
@@ -253,6 +348,17 @@ async function handleRequest(
       if (typeof parsed.speed === 'number') synthInput.speed = parsed.speed;
 
       const { wav } = await ctx.registry.synthesizeSpeechWav(synthInput);
+      if (format === 'pcm') {
+        const pcm = extractWavDataChunk(wav);
+        res.writeHead(200, {
+          'Content-Type': 'audio/pcm',
+          'Content-Length': String(pcm.byteLength),
+          'Cache-Control': 'no-store',
+          ...corsHeaders,
+        });
+        res.end(Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength));
+        return;
+      }
       res.writeHead(200, {
         'Content-Type': 'audio/wav',
         'Content-Length': String(wav.byteLength),
@@ -274,22 +380,12 @@ async function handleRequest(
             : undefined,
         );
       } catch (err) {
-        sendJson(
-          res,
-          400,
-          { error: { message: err instanceof Error ? err.message : 'Invalid multipart form' } },
-          corsHeaders,
-        );
+        sendError(res, 400, err instanceof Error ? err.message : 'Invalid multipart form', 'invalid_multipart', corsHeaders);
         return;
       }
 
       if (!form.file || form.file.bytes.byteLength === 0) {
-        sendJson(
-          res,
-          400,
-          { error: { message: 'Missing uploaded WAV audio in "file" field' } },
-          corsHeaders,
-        );
+        sendError(res, 400, 'Missing uploaded WAV audio in "file" field', 'missing_audio', corsHeaders);
         return;
       }
 
@@ -297,12 +393,7 @@ async function handleRequest(
       try {
         decoded = decodePcm16Wav(form.file.bytes);
       } catch (err) {
-        sendJson(
-          res,
-          400,
-          { error: { message: err instanceof Error ? err.message : 'Malformed WAV file' } },
-          corsHeaders,
-        );
+        sendError(res, 400, err instanceof Error ? err.message : 'Malformed WAV file', 'malformed_wav', corsHeaders);
         return;
       }
 
@@ -336,17 +427,17 @@ async function handleRequest(
       return;
     }
 
-    sendJson(res, 404, { error: { message: `Unknown route ${method} ${pathname}` } }, corsHeaders);
+    sendError(res, 404, `Unknown route ${method} ${pathname}`, 'unknown_route', corsHeaders);
   } catch (err) {
     if (err instanceof PayloadTooLargeError) {
-      sendJson(res, 413, { error: { message: err.message } }, corsHeaders);
+      sendError(res, 413, err.message, 'payload_too_large', corsHeaders);
       return;
     }
     if (err instanceof ModelNotInstalledError) {
-      sendJson(res, 503, { error: { message: err.message } }, corsHeaders);
+      sendError(res, 503, err.message, 'model_not_installed', corsHeaders);
       return;
     }
     const safeMsg = redactSecrets(err instanceof Error ? err.message : String(err));
-    sendJson(res, 500, { error: { message: safeMsg } }, corsHeaders);
+    sendError(res, 500, safeMsg, 'internal_error', corsHeaders);
   }
 }

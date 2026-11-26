@@ -267,3 +267,84 @@ describe('voice-daemon HTTP server, Kokoro 103 emotion synthesis, dual ASR, and 
     assert.equal(fallbackReasons.length, 1);
   });
 });
+
+describe('voice-daemon OpenAI-compatible hardening (D-0013 D+)', () => {
+  it('exposes /v1/models, /v1/capabilities, structured error bodies and pcm output', async () => {
+    const { backend } = createDeterministicBackend();
+    const registry = new SpeechEngineRegistry({
+      backend,
+      resolveBundleDir: async (id) => `/virtual/models/${id}`,
+    });
+    const token = `sk-vmd-${'e'.repeat(48)}`;
+    const server = await startVoiceDaemonServer({ port: 0, token, registry });
+    const baseUrl = `http://127.0.0.1:${server.port}`;
+    const authHeaders = {
+      Origin: 'app://obsidian.md',
+      Authorization: `Bearer ${token}`,
+    };
+
+    try {
+      const models = await fetch(`${baseUrl}/v1/models`, { headers: authHeaders });
+      assert.equal(models.status, 200);
+      const modelsBody = (await models.json()) as {
+        data: Array<{ id: string; voices?: string[] }>;
+      };
+      assert.deepEqual(
+        modelsBody.data.map((m) => m.id).sort(),
+        ['kokoro-int8', 'sensevoice', 'zipformer2'],
+      );
+      assert.equal(modelsBody.data.find((m) => m.id === 'kokoro-int8')?.voices?.length, 103);
+
+      const caps = await fetch(`${baseUrl}/v1/capabilities`, { headers: authHeaders });
+      assert.equal(caps.status, 200);
+      const capsBody = (await caps.json()) as {
+        tts: {
+          engines: Array<{
+            expression: { emotion: string; supported: string[] };
+            responseFormats: string[];
+          }>;
+        };
+        limits: { maxTtsInputChars: number };
+      };
+      assert.equal(capsBody.tts.engines[0]?.expression.emotion, 'none');
+      assert.ok(capsBody.tts.engines[0]?.expression.supported.includes('whisper'));
+      assert.deepEqual(capsBody.tts.engines[0]?.responseFormats, ['wav', 'pcm']);
+      assert.equal(capsBody.limits.maxTtsInputChars, 8_000);
+
+      const badFormat = await fetch(`${baseUrl}/v1/audio/speech`, {
+        method: 'POST',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'hi', response_format: 'mp3' }),
+      });
+      assert.equal(badFormat.status, 400);
+      assert.deepEqual(await badFormat.json(), {
+        error: {
+          message: 'Unsupported response_format "mp3"; use "wav" or "pcm"',
+          type: 'invalid_request_error',
+          code: 'unsupported_response_format',
+        },
+      });
+
+      const pcm = await fetch(`${baseUrl}/v1/audio/speech`, {
+        method: 'POST',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'hi', response_format: 'pcm' }),
+      });
+      assert.equal(pcm.status, 200);
+      assert.equal(pcm.headers.get('content-type'), 'audio/pcm');
+      const pcmBytes = new Uint8Array(await pcm.arrayBuffer());
+      // Deterministic backend yields 2400 samples at 24 kHz mono -> 4800 PCM bytes, no WAV header.
+      assert.equal(pcmBytes.byteLength, 4_800);
+
+      const notFound = await fetch(`${baseUrl}/v1/nope`, { headers: authHeaders });
+      assert.equal(notFound.status, 404);
+      const notFoundBody = (await notFound.json()) as {
+        error: { type: string; code: string };
+      };
+      assert.equal(notFoundBody.error.code, 'unknown_route');
+      assert.equal(notFoundBody.error.type, 'invalid_request_error');
+    } finally {
+      await server.close();
+    }
+  });
+});
