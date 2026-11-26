@@ -16,6 +16,12 @@
 4. 能力变化同步 `/v1/capabilities` 与 `/v1/models`（source: `@voice-mode/core` 契约）。
 5. TTS 输入 ≤8000 字符、ASR ≤25MiB；新增端点必须更新 README 与 `docs/13` 契约。
 
+## 提交前检查（2026-11-26 教训）
+
+- 删除任何 i18n key / 常量前，必须先跑完整 `pnpm run check:all`（含 typecheck）——只跑 test 会漏掉类型错误。
+- 推送后必须复核 CI 实际结论（`gh run list` / 母仓 `scripts/check-ci.mjs`）：push 成功 ≠ CI 绿。
+- 新增测试断言不得依赖本机缓存/状态（CI 是干净环境，例如空模型缓存输出 "Nothing to clean"）。
+
 ## 禁止
 
 - 不 `git add -A`；提交白名单。
