@@ -32,13 +32,14 @@
 
 ### GET /v1/models
 
-返回可按需加载的模型清单与能力：
+OpenAI 兼容的模型清单（`object: "list"` / `data[]`），供宿主枚举引擎与能力：
 
 ```json
-{ "ok": true, "engines": [
-  { "id": "kokoro-int8", "capabilities": ["tts"], "voices": ["zf_xiaobei", "..."] },
-  { "id": "zipformer2", "capabilities": ["asr"] },
-  { "id": "sensevoice-int8", "capabilities": ["asr"] }
+{ "ok": true, "object": "list", "data": [
+  { "id": "kokoro-int8", "object": "model", "owned_by": "voice-daemon",
+    "capabilities": ["tts"], "voices": ["zf_xiaobei", "..."] },
+  { "id": "zipformer2", "object": "model", "owned_by": "voice-daemon", "capabilities": ["asr"] },
+  { "id": "sensevoice-int8", "object": "model", "owned_by": "voice-daemon", "capabilities": ["asr"] }
 ] }
 ```
 
