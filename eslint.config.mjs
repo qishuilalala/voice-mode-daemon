@@ -33,6 +33,8 @@ export default tseslint.config(
         URL: 'readonly',
         fetch: 'readonly',
         WebSocket: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
         TextDecoder: 'readonly',
         Uint8Array: 'readonly',
       },
