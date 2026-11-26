@@ -39,6 +39,9 @@ jobs:
       - name: Build, typecheck, lint, unit tests, and MV3 release gate
         run: pnpm run check:all
 
+      - name: MCP end-to-end (real daemon + stdio JSON-RPC)
+        run: pnpm run verify:mcp
+
   audit:
     name: Security Audit
     runs-on: ubuntu-latest
