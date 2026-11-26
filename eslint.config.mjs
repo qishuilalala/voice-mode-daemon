@@ -25,12 +25,15 @@ export default tseslint.config(
     },
   },
   {
-    files: ['scripts/**/*.mjs', 'packages/*/scripts/**/*.mjs'],
+    files: ['scripts/**/*.mjs', 'packages/*/scripts/**/*.mjs', 'examples/**/*.mjs'],
     languageOptions: {
       globals: {
         console: 'readonly',
         process: 'readonly',
         URL: 'readonly',
+        fetch: 'readonly',
+        TextDecoder: 'readonly',
+        Uint8Array: 'readonly',
       },
     },
   },
