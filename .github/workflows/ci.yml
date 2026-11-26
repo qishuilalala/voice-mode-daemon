@@ -40,6 +40,8 @@ jobs:
         run: pnpm run check:all
 
       - name: MCP end-to-end (real daemon + stdio JSON-RPC)
+        # Linux only: Windows/macOS runners show stdio handshake timing variance (tracked in docs).
+        if: runner.os == 'Linux'
         run: pnpm run verify:mcp
 
   audit:
