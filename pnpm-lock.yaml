@@ -508,7 +508,7 @@ packages:
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
 
   '@voice-mode/browser@file:vendor/voice-mode-browser-0.1.0.tgz':
-    resolution: {integrity: sha512-/fzVPbLagcMYMVeK8+55EYGKkzJCymKuqCqm1+ot55RaPH4R04qy5vm9KZ8qbbczOvH0yY0MzGQwKZJOsjmmxA==, tarball: file:vendor/voice-mode-browser-0.1.0.tgz}
+    resolution: {integrity: sha512-bv80W66kMKXYwDqxnU6LABVmyGv29T/xa7waFwxgLetDzLETfaB2sf+/3TiuORKxbjnz16NkN+vESj/ufB3/0A==, tarball: file:vendor/voice-mode-browser-0.1.0.tgz}
     version: 0.1.0
 
   '@voice-mode/core@file:vendor/voice-mode-core-0.1.0.tgz':
