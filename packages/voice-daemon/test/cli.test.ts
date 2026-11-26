@@ -29,7 +29,9 @@ describe('CLI surface', () => {
 
   it('previews model cleanup without deleting anything', () => {
     const out = run('models', 'clean');
-    assert.match(out, /Would remove|No installed bundles/);
+    // Three environments: bundles under the primary dir (Would remove...), fallback-only
+    // (No installed bundles...), and a completely empty cache (Nothing to clean...).
+    assert.match(out, /Would remove|No installed bundles|Nothing to clean/);
     assert.ok(!/Removed \d/.test(out), 'preview must not report deletions');
   });
 });
