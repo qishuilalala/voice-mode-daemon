@@ -13,5 +13,27 @@
   "dependencies": {
     "@voice-mode/browser": "file:../../vendor/voice-mode-browser-0.1.0.tgz",
     "@voice-mode/core": "file:../../vendor/voice-mode-core-0.1.0.tgz"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/qishuilalala/voice-mode-daemon.git",
+    "directory": "packages/browser-extension"
+  },
+  "homepage": "https://github.com/qishuilalala/voice-mode-daemon#readme",
+  "author": {
+    "name": "qishuilalala",
+    "url": "https://github.com/qishuilalala"
+  },
+  "keywords": [
+    "voice",
+    "tts",
+    "asr",
+    "chrome-extension",
+    "edge-extension",
+    "manifest-v3",
+    "kokoro",
+    "sherpa-onnx",
+    "offline",
+    "speech"
+  ]
 }
