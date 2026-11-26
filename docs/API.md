@@ -21,9 +21,14 @@
   "version": "0.1.0",
   "capabilities": ["tts:kokoro-103", "asr:zipformer2", "asr:sensevoice"],
   "modelsLoaded": ["kokoro-int8"],
+  "modelInstanceCount": 1,
+  "pid": 12345,
+  "rssBytes": 268435456,
   "voices": ["zf_xiaobei", "zf_xiaoni", "..."]
 }
 ```
+
+`modelInstanceCount`/`pid`/`rssBytes` 供宿主做诊断与资源展示（进程 RSS 是当前常驻内存）。
 
 ### GET /v1/models
 
@@ -37,20 +42,31 @@
 ] }
 ```
 
+`voices` 仅 TTS 引擎返回（103 个 Kokoro 音色）。
+
 ### GET /v1/models/status
 
 磁盘缓存状态（是否已下载/可加载），用于首次使用前的提示。
 
 ### GET /v1/capabilities
 
-表达力能力契约（E1）与解码能力：
+表达力能力契约（E1）与解码能力（引擎分组结构）：
 
 ```json
 { "ok": true, "service": "voice-daemon", "version": "0.1.0",
-  "tts": { "engine": "kokoro-daemon", "supported": ["voices", "rate", "pause", "whisper"], "maxPauseMs": 5000, "voices": ["..."] },
-  "asr": [{ "id": "zipformer2" }, { "id": "sensevoice-int8" }],
-  "formats": ["wav", "pcm"] }
+  "tts": { "engines": [
+    { "id": "kokoro", "model": "kokoro-int8", "voices": ["zf_xiaobei", "..."],
+      "responseFormats": ["wav", "pcm"],
+      "expression": { "engine": "kokoro-daemon", "supported": ["voices", "rate", "pause", "whisper"], "maxPauseMs": 5000 } }
+  ] },
+  "asr": { "engines": [
+    { "id": "zipformer2", "responseFormats": ["json", "text"] },
+    { "id": "sensevoice", "responseFormats": ["json", "text"] }
+  ] },
+  "limits": { "maxTtsInputChars": 4000, "maxAsrAudioBytes": 268435456 } }
 ```
+
+`tts.engines[].expression` 是 `@voice-mode/core` 的 E1 能力契约原样透出（字段以 core 的 `ExpressionCaps` 为准）。
 
 ### POST /v1/audio/speech
 
