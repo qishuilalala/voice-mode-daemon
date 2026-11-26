@@ -52,6 +52,12 @@ node packages/voice-daemon/dist/cli.js token-path
 
 The Side Panel follows the browser UI language. English is the default, and Simplified Chinese is available.
 
+## Connection Failures and Fallback
+
+- **Invalid token.** Copy the current token again from the file printed by `token-path`. If the daemon was started with `--token-file`, use the same flag when looking up the token.
+- **Cannot connect.** Confirm `serve` is still running and that the side panel address matches the port in the startup log. The extension health probe times out after 500 ms; model load, inference and cloud responses depend on your device and network.
+- **Browser or cloud fallback.** For cloud fallback, enter an OpenAI-compatible API URL and your own key; the service must allow browser CORS requests and will receive the spoken text or dictation audio. Without it, read-aloud falls back to browser speech synthesis. When the local daemon is unavailable, new dictation attempts may use browser speech recognition when supported (recognition may require network access).
+
 ## HTTP Wire Contract (`127.0.0.1:18790`)
 
 Authenticate each endpoint with `Authorization: Bearer <token>`.
