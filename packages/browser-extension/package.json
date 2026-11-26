@@ -1,7 +1,7 @@
 {
   "name": "@voice-mode/browser-extension",
   "version": "0.1.0",
-  "description": "Chrome and Edge Manifest V3 extension for Voice Mode backed by local voice-daemon with <1s fallback.",
+  "description": "零 <all_urls> 的 Chrome/Edge MV3 语音扩展：Markdown 感知朗读、可选打断与听写。",
   "license": "MIT",
   "type": "module",
   "private": true,

@@ -1,7 +1,7 @@
 {
   "name": "@voice-mode/daemon",
   "version": "0.1.0",
-  "description": "Native Node.js loopback speech acceleration daemon (Kokoro 103 TTS + Zipformer2 & SenseVoice ASR).",
+  "description": "本机回环语音加速守护进程：Kokoro 103 音色、Zipformer2/SenseVoice 双通道识别。",
   "license": "MIT",
   "type": "module",
   "engines": {
