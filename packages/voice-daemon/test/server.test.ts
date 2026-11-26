@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import WebSocket from 'ws';
 import { DaemonClient, KOKORO_SPEAKERS_103, encodeMonoPcm16Wav } from '@voice-mode/core';
 import {
   KOKORO_EXPOSED_VOICES,
@@ -37,6 +38,21 @@ function createDeterministicBackend() {
           return {
             text: `zipformer:${samples.length}@${sampleRate}`,
             language: 'zh',
+          };
+        },
+        createStreamingSession() {
+          let received = 0;
+          return {
+            accept(samples: Float32Array) {
+              received += samples.length;
+            },
+            partial() {
+              return received > 0 ? `zipformer-partial:${received}` : '';
+            },
+            finish() {
+              return { text: `zipformer-final:${received}`, language: 'zh' };
+            },
+            close() {},
           };
         },
       };
@@ -347,4 +363,56 @@ describe('voice-daemon OpenAI-compatible hardening (D-0013 D+)', () => {
       await server.close();
     }
   });
+
+  it('streams incremental ASR over WebSocket with partial and final frames (P1-5)', async () => {
+    const { backend } = createDeterministicBackend();
+    const registry = new SpeechEngineRegistry({
+      backend,
+      resolveBundleDir: async (id) => `/virtual/models/${id}`,
+    });
+    const token = `sk-vmd-${'e'.repeat(48)}`;
+    const server = await startVoiceDaemonServer({ port: 0, token, registry });
+    const waitFor = async (predicate: () => boolean, timeoutMs = 5_000): Promise<void> => {
+      const started = Date.now();
+      while (!predicate()) {
+        if (Date.now() - started > timeoutMs) {
+          throw new Error('timed out waiting for WS message');
+        }
+        await new Promise((r) => setTimeout(r, 10));
+      }
+    };
+    try {
+      const ws = new WebSocket(
+        `ws://127.0.0.1:${server.port}/v1/audio/transcriptions/stream?token=${token}`,
+      );
+      const messages: Array<Record<string, unknown>> = [];
+      ws.on('message', (data) => {
+        messages.push(JSON.parse(data.toString()) as Record<string, unknown>);
+      });
+      await new Promise<void>((resolve, reject) => {
+        ws.once('open', () => resolve());
+        ws.once('error', reject);
+      });
+      await waitFor(() => messages.some((m) => m.type === 'ready'));
+      assert.equal(messages[0]?.type, 'ready');
+
+      // 100 mono PCM16 samples @16 kHz (silence).
+      ws.send(Buffer.alloc(200));
+      await waitFor(() => messages.some((m) => m.type === 'partial'));
+      const partial = messages.find((m) => m.type === 'partial');
+      assert.equal(partial?.ok, true);
+      assert.match(String(partial?.text), /^zipformer-partial:\d+$/);
+
+      ws.send(JSON.stringify({ type: 'stop' }));
+      await waitFor(() => messages.some((m) => m.type === 'final'));
+      const final = messages.find((m) => m.type === 'final');
+      assert.equal(final?.ok, true);
+      assert.match(String(final?.text), /^zipformer-final:\d+$/);
+      assert.equal(final?.language, 'zh');
+      ws.close();
+    } finally {
+      await server.close();
+    }
+  });
+
 });

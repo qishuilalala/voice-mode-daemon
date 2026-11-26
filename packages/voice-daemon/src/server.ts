@@ -1,4 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import type { Duplex } from 'node:stream';
+import { WebSocketServer, type WebSocket } from 'ws';
 import type { AddressInfo } from 'node:net';
 import { EXPRESSION_CAPS, MAX_ASR_AUDIO_BYTES, redactSecrets } from '@voice-mode/core';
 import {
@@ -135,6 +137,17 @@ export async function startVoiceDaemonServer(
     });
   });
 
+  const streamingWss = new WebSocketServer({ noServer: true });
+  const requestContext: RequestContext = {
+    boundPort: 0,
+    expectedToken: token,
+    registry,
+    cacheOptions: options,
+  };
+  httpServer.on('upgrade', (req, socket, head) => {
+    void handleStreamingUpgrade(req, socket, head, streamingWss, requestContext);
+  });
+
   await new Promise<void>((resolve, reject) => {
     const onError = (err: Error) => {
       httpServer.off('listening', onListening);
@@ -151,12 +164,21 @@ export async function startVoiceDaemonServer(
 
   const addr = httpServer.address() as AddressInfo | null;
   boundPort = addr?.port ?? requestedPort;
+  requestContext.boundPort = boundPort;
 
   return {
     host,
     port: boundPort,
     registry,
     close(): Promise<void> {
+      for (const client of streamingWss.clients) {
+        try {
+          client.close(1001, 'daemon shutting down');
+        } catch {
+          // Ignore close errors during shutdown.
+        }
+      }
+      streamingWss.close();
       return new Promise<void>((resolve, reject) => {
         httpServer.close((err) => {
           if (err) reject(err);
@@ -439,5 +461,174 @@ async function handleRequest(
     }
     const safeMsg = redactSecrets(err instanceof Error ? err.message : String(err));
     sendError(res, 500, safeMsg, 'internal_error', corsHeaders);
+  }
+}
+
+// ---- Streaming ASR over WebSocket (P1-5) -------------------------------------
+
+const STREAMING_PATH = '/v1/audio/transcriptions/stream';
+const STREAMING_IDLE_MS = 60_000;
+
+function rejectUpgrade(socket: Duplex, status: number, message: string): void {
+  const body = message.replace(/[\r\n]/g, ' ');
+  socket.write(
+    `HTTP/1.1 ${status} ${status === 401 ? 'Unauthorized' : 'Forbidden'}\r\n` +
+      'Content-Type: text/plain; charset=utf-8\r\n' +
+      `Content-Length: ${Buffer.byteLength(body)}\r\n` +
+      'Connection: close\r\n\r\n' +
+      body,
+  );
+  socket.destroy();
+}
+
+async function handleStreamingUpgrade(
+  req: IncomingMessage,
+  socket: Duplex,
+  head: Buffer,
+  wss: WebSocketServer,
+  ctx: RequestContext,
+): Promise<void> {
+  const url = new URL(req.url ?? '/', `http://127.0.0.1:${ctx.boundPort || 1}`);
+  if (url.pathname.replace(/\/+$/, '') !== STREAMING_PATH) {
+    rejectUpgrade(socket, 404, 'Not found');
+    return;
+  }
+  // Browser WebSocket cannot set headers: accept ?token= as an alternative to Authorization.
+  const queryToken = url.searchParams.get('token')?.trim() ?? '';
+  const authorizationHeader =
+    typeof req.headers.authorization === 'string'
+      ? req.headers.authorization
+      : queryToken
+        ? `Bearer ${queryToken}`
+        : undefined;
+  const guard = evaluateLoopbackSecurity({
+    method: 'GET',
+    hostHeader: typeof req.headers.host === 'string' ? req.headers.host : undefined,
+    originHeader: typeof req.headers.origin === 'string' ? req.headers.origin : undefined,
+    authorizationHeader,
+    boundPort: ctx.boundPort,
+    expectedToken: ctx.expectedToken,
+  });
+  if (!guard.ok) {
+    rejectUpgrade(socket, guard.status, guard.error);
+    return;
+  }
+
+  wss.handleUpgrade(req, socket, head, (ws) => {
+    void runStreamingSession(ws, ctx);
+  });
+}
+
+async function runStreamingSession(ws: WebSocket, ctx: RequestContext): Promise<void> {
+  let session: Awaited<ReturnType<SpeechEngineRegistry['createStreamingAsrSession']>>;
+  try {
+    session = await ctx.registry.createStreamingAsrSession();
+  } catch (err) {
+    sendStreamingJson(ws, {
+      ok: false,
+      type: 'error',
+      message: err instanceof Error ? err.message : 'streaming ASR unavailable',
+      code: 'asr_unavailable',
+    });
+    ws.close(1011, 'asr unavailable');
+    return;
+  }
+
+  sendStreamingJson(ws, { ok: true, type: 'ready', sampleRate: 16_000, format: 'pcm16le' });
+
+  let lastPartial = '';
+  let closed = false;
+  const idleTimer = setInterval(() => {
+    if (!closed) {
+      ws.close(1000, 'idle timeout');
+    }
+  }, STREAMING_IDLE_MS);
+
+  const cleanup = (): void => {
+    closed = true;
+    clearInterval(idleTimer);
+    try {
+      session.close();
+    } catch {
+      // Ignore session close errors on teardown.
+    }
+  };
+
+  ws.on('message', (data, isBinary) => {
+    if (closed) {
+      return;
+    }
+    if (isBinary) {
+      const bytes = Buffer.isBuffer(data)
+        ? data
+        : Array.isArray(data)
+          ? Buffer.concat(data)
+          : Buffer.from(data as ArrayBuffer);
+      if (bytes.byteLength < 2) {
+        return;
+      }
+      const samples = new Float32Array(Math.floor(bytes.byteLength / 2));
+      for (let i = 0; i < samples.length; i += 1) {
+        samples[i] = bytes.readInt16LE(i * 2) / 32_768;
+      }
+      try {
+        session.accept(samples, 16_000);
+      } catch (err) {
+        sendStreamingJson(ws, {
+          ok: false,
+          type: 'error',
+          message: err instanceof Error ? err.message : 'streaming decode failed',
+          code: 'decode_failed',
+        });
+        cleanup();
+        ws.close(1011, 'decode failed');
+        return;
+      }
+      const partial = session.partial();
+      if (partial !== lastPartial) {
+        lastPartial = partial;
+        sendStreamingJson(ws, { ok: true, type: 'partial', text: partial });
+      }
+      return;
+    }
+    // Text control frames: {"type":"stop"} finalizes the session.
+    let control: { type?: string } = {};
+    try {
+      control = JSON.parse(data.toString()) as { type?: string };
+    } catch {
+      sendStreamingJson(ws, { ok: false, type: 'error', message: 'malformed control frame', code: 'malformed_control' });
+      return;
+    }
+    if (control.type === 'stop') {
+      try {
+        const final = session.finish();
+        sendStreamingJson(ws, {
+          ok: true,
+          type: 'final',
+          text: final.text,
+          ...(final.language ? { language: final.language } : {}),
+        });
+      } catch (err) {
+        sendStreamingJson(ws, {
+          ok: false,
+          type: 'error',
+          message: err instanceof Error ? err.message : 'finalize failed',
+          code: 'finalize_failed',
+        });
+      }
+      cleanup();
+      ws.close(1000, 'done');
+    }
+  });
+
+  ws.on('close', cleanup);
+  ws.on('error', cleanup);
+}
+
+function sendStreamingJson(ws: WebSocket, payload: Record<string, unknown>): void {
+  try {
+    ws.send(JSON.stringify(payload));
+  } catch {
+    // Ignore send errors on a closing socket.
   }
 }

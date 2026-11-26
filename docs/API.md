@@ -84,6 +84,30 @@
 
 错误码：`missing_file`、`unsupported_audio`、`asr_unavailable`、`model_not_found`。
 
+### WS /v1/audio/transcriptions/stream
+
+WebSocket 流式转写（P1-5，增量 partial + 结束 final）。需 zipformer2 模型已安装。
+
+- 连接：`ws://127.0.0.1:18790/v1/audio/transcriptions/stream?token=<token>`
+  - 浏览器 WebSocket 无法自定义头，故支持 `?token=`；同样执行回环 Host/Origin 校验
+- 客户端 → 服务端：
+  - binary 帧：mono **PCM16 LE @ 16 kHz**（建议每帧 100–500 ms）
+  - text 帧：`{"type":"stop"}` → 返回 final 并关闭
+- 服务端 → 客户端（JSON 文本帧）：
+  - `{"ok":true,"type":"ready","sampleRate":16000,"format":"pcm16le"}`
+  - `{"ok":true,"type":"partial","text":"…"}`（文本变化时推送）
+  - `{"ok":true,"type":"final","text":"…","language":"zh"}`
+  - `{"ok":false,"type":"error","code":"asr_unavailable|decode_failed|finalize_failed|malformed_control","message":"…"}`
+- 空闲 60 秒自动关闭；每个连接独立识别流。
+
+```js
+const ws = new WebSocket(`ws://127.0.0.1:18790/v1/audio/transcriptions/stream?token=${token}`);
+ws.onmessage = (e) => console.log(JSON.parse(e.data));
+ws.onopen = () => { ws.send(pcm16Chunk); ws.send(JSON.stringify({ type: 'stop' })); };
+```
+
+完整示例见 [`examples/ws-streaming.mjs`](../examples/ws-streaming.mjs)。
+
 ## 3. 示例
 
 ```bash

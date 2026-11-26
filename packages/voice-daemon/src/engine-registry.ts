@@ -56,12 +56,22 @@ export interface KokoroTtsInstance {
   ): Promise<{ samples: Float32Array; sampleRate: number }>;
 }
 
+/** Incremental recognition session for the streaming (WS) transcription path. */
+export interface StreamingAsrSession {
+  accept(samples: Float32Array, sampleRate: number): void;
+  partial(): string;
+  finish(): { text: string; language?: string };
+  close(): void;
+}
+
 export interface AsrRecognizerInstance {
   transcribe(
     samples: Float32Array,
     sampleRate: number,
     language?: string,
   ): Promise<{ text: string; language?: string }>;
+  /** Optional streaming session factory (zipformer2 OnlineRecognizer). */
+  createStreamingSession?(): StreamingAsrSession;
 }
 
 export interface NativeSpeechBackend {
@@ -136,6 +146,13 @@ export function createSherpaNodeBackend(): NativeSpeechBackend {
         enableEndpoint: 0,
       });
 
+      const decodeAvailable = (stream: ReturnType<typeof recognizer.createStream>): string => {
+        while (recognizer.isReady(stream)) {
+          recognizer.decode(stream);
+        }
+        const res = recognizer.getResult(stream);
+        return (res.text ?? '').trim();
+      };
       return {
         async transcribe(samples: Float32Array, sampleRate: number) {
           const tailPad = Math.round(sampleRate * 0.5);
@@ -144,13 +161,26 @@ export function createSherpaNodeBackend(): NativeSpeechBackend {
           const stream = recognizer.createStream();
           stream.acceptWaveform({ samples: padded, sampleRate });
           stream.inputFinished();
-          while (recognizer.isReady(stream)) {
-            recognizer.decode(stream);
-          }
-          const res = recognizer.getResult(stream);
+          const text = decodeAvailable(stream);
+          return { text, language: 'zh' };
+        },
+        createStreamingSession() {
+          const stream = recognizer.createStream();
           return {
-            text: (res.text ?? '').trim(),
-            language: 'zh',
+            accept(samples: Float32Array, sampleRate: number) {
+              stream.acceptWaveform({ samples, sampleRate });
+              decodeAvailable(stream);
+            },
+            partial() {
+              const res = recognizer.getResult(stream);
+              return (res.text ?? '').trim();
+            },
+            finish() {
+              stream.inputFinished();
+              const text = decodeAvailable(stream);
+              return { text, language: 'zh' };
+            },
+            close() {},
           };
         },
       };
@@ -282,6 +312,15 @@ export class SpeechEngineRegistry {
       if (!dir) throw new ModelNotInstalledError('sensevoice-int8');
       return this.backend.createSenseVoiceRecognizer(dir, this.numThreads);
     });
+  }
+
+  /** Open a streaming ASR session on the shared zipformer2 OnlineRecognizer. */
+  async createStreamingAsrSession(): Promise<StreamingAsrSession> {
+    const recognizer = await this.zipformerSlot.ensure();
+    if (!recognizer.createStreamingSession) {
+      throw new Error('zipformer2 recognizer does not support streaming sessions');
+    }
+    return recognizer.createStreamingSession();
   }
 
   modelsLoaded(): DaemonBundleId[] {

@@ -27,7 +27,8 @@
   },
   "dependencies": {
     "@voice-mode/core": "file:../../vendor/voice-mode-core-0.1.0.tgz",
-    "sherpa-onnx-node": "1.13.6"
+    "sherpa-onnx-node": "1.13.6",
+    "ws": "^8.23.0"
   },
   "repository": {
     "type": "git",
@@ -50,5 +51,8 @@
     "local",
     "offline",
     "daemon"
-  ]
+  ],
+  "devDependencies": {
+    "@types/ws": "^8.18.2"
+  }
 }
