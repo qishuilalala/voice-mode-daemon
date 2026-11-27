@@ -5,6 +5,7 @@ import {
   compileEmotionPlan,
   encodeMonoPcm16Wav,
   findKokoroVoice,
+  splitSentences,
 } from '@voice-mode/core';
 import {
   resolveInstalledBundleDir,
@@ -22,6 +23,34 @@ const DEFAULT_KOKORO_SID = 3; // zf_001
 const WHISPER_GAIN = 0.5;
 const KOKORO_MIN_SPEED = 0.5;
 const KOKORO_MAX_SPEED = 2.0;
+const SYNTHESIS_ABORTED_MESSAGE = 'speech synthesis was aborted';
+
+/** Throw an `AbortError` when the caller has cancelled the request. */
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  const err = new Error(SYNTHESIS_ABORTED_MESSAGE);
+  err.name = 'AbortError';
+  throw err;
+}
+
+/**
+ * Split one emotion-plan segment into sentence-sized synthesis chunks so an HTTP client
+ * abort can stop the native engine after the current sentence instead of after the whole
+ * (up to 8,000 character) utterance, which would hold the shared TTS queue hostage.
+ * Emotion segments, whisper gain, and break pauses are preserved; only the abort
+ * granularity changes.
+ */
+function splitSynthesisChunks(text: string): string[] {
+  const { sentences, tail } = splitSentences(text);
+  const chunks: string[] = [];
+  for (const sentence of sentences) {
+    const trimmed = sentence.trim();
+    if (trimmed) chunks.push(trimmed);
+  }
+  const rest = tail.trim();
+  if (rest) chunks.push(rest);
+  return chunks.length > 0 ? chunks : [text];
+}
 
 export function resolveKokoroSpeakerId(voice: string | undefined): number {
   if (typeof voice !== 'string') return DEFAULT_KOKORO_SID;
@@ -339,6 +368,8 @@ export class SpeechEngineRegistry {
     text: string;
     voice?: string;
     speed?: number;
+    /** Aborted by the HTTP layer when the client disconnects; stops pending synthesis work. */
+    signal?: AbortSignal;
   }): Promise<{ wav: Uint8Array; sampleRate: number; sid: number }> {
     const plan = compileEmotionPlan(input.text, 'pcm-segments');
     if (plan.segments.length === 0) {
@@ -351,15 +382,21 @@ export class SpeechEngineRegistry {
 
     const sid = resolveKokoroSpeakerId(input.voice);
     const speed = clampKokoroSpeed(input.speed);
+    const signal = input.signal;
+    throwIfAborted(signal);
     const tts = await this.kokoroSlot.ensure();
+    throwIfAborted(signal);
 
     const runSynthesis = async () => {
+      // A request aborted while queued behind the shared TTS instance must not synthesize.
+      throwIfAborted(signal);
       const startsWithBreak = /^\s*<\s*break\b/i.test(input.text);
       const chunks: Float32Array[] = [];
       let totalSamples = 0;
       let effectiveRate = tts.sampleRate || 24_000;
 
       for (let idx = 0; idx < plan.segments.length; idx += 1) {
+        throwIfAborted(signal);
         const seg = plan.segments[idx];
         if (!seg) continue;
 
@@ -373,19 +410,24 @@ export class SpeechEngineRegistry {
           totalSamples += pauseSamples;
         }
 
-        const generated = await tts.synthesize(seg.text, sid, speed);
-        effectiveRate = generated.sampleRate || effectiveRate;
-        const pcm = generated.samples;
-        if (seg.whisper) {
-          const whispered = new Float32Array(pcm.length);
-          for (let i = 0; i < pcm.length; i += 1) {
-            whispered[i] = (pcm[i] ?? 0) * WHISPER_GAIN;
+        for (const sentence of splitSynthesisChunks(seg.text)) {
+          throwIfAborted(signal);
+          const generated = await tts.synthesize(sentence, sid, speed);
+          // The native call cannot be interrupted; drop its result if the client already left.
+          throwIfAborted(signal);
+          effectiveRate = generated.sampleRate || effectiveRate;
+          const pcm = generated.samples;
+          if (seg.whisper) {
+            const whispered = new Float32Array(pcm.length);
+            for (let i = 0; i < pcm.length; i += 1) {
+              whispered[i] = (pcm[i] ?? 0) * WHISPER_GAIN;
+            }
+            chunks.push(whispered);
+            totalSamples += whispered.length;
+          } else {
+            chunks.push(pcm);
+            totalSamples += pcm.length;
           }
-          chunks.push(whispered);
-          totalSamples += whispered.length;
-        } else {
-          chunks.push(pcm);
-          totalSamples += pcm.length;
         }
 
         if (pauseSamples > 0 && !(idx === 0 && startsWithBreak)) {

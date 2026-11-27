@@ -507,3 +507,141 @@ describe('voice-daemon OpenAI-compatible hardening (D-0013 D+)', () => {
   });
 
 });
+
+
+describe('voice-daemon HTTP TTS cancellation (real client abort)', () => {
+  function createSlowBackend(delayMs: number) {
+    const { backend } = createDeterministicBackend();
+    const synthCalls: string[] = [];
+    const originalCreate = backend.createKokoroTts.bind(backend);
+    backend.createKokoroTts = async (...args) => {
+      const tts = await originalCreate(...args);
+      return {
+        ...tts,
+        async synthesize(text: string, sid: number, speed: number) {
+          synthCalls.push(text);
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          return tts.synthesize(text, sid, speed);
+        },
+      };
+    };
+    return { backend, synthCalls };
+  }
+
+  function createClient(serverToken: string, port: number) {
+    const headers = {
+      Origin: 'app://obsidian.md',
+      Authorization: `Bearer ${serverToken}`,
+      'Content-Type': 'application/json',
+    };
+    const baseUrl = `http://127.0.0.1:${port}`;
+    return {
+      headers,
+      synth: (input: string, signal?: AbortSignal) =>
+        fetch(`${baseUrl}/v1/audio/speech`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ input }),
+          ...(signal ? { signal } : {}),
+        }),
+      synthOutcome: (input: string, signal: AbortSignal) =>
+        fetch(`${baseUrl}/v1/audio/speech`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ input }),
+          signal,
+        }).then(
+          (res) => ({ res }),
+          (err: unknown) => ({ err }),
+        ),
+    };
+  }
+
+  it('stops synthesized emotion segments once the HTTP client aborts', async () => {
+    const { backend, synthCalls } = createSlowBackend(40);
+    const registry = new SpeechEngineRegistry({
+      backend,
+      resolveBundleDir: async (id) => `/virtual/models/${id}`,
+    });
+    const token = `sk-vmd-${'j'.repeat(48)}`;
+    const server = await startVoiceDaemonServer({ port: 0, token, registry });
+    const client = createClient(token, server.port);
+    try {
+      assert.equal((await client.synth('预热。')).status, 200);
+      synthCalls.length = 0;
+
+      // 30 individually break-delimited segments => 30 registry.synthesize calls.
+      const segmentedText = '取消验证句。<break 100ms>'.repeat(30);
+      const ac = new AbortController();
+      const pending = client.synthOutcome(segmentedText, ac.signal);
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      ac.abort(new Error('client interrupted'));
+      const outcome = await pending;
+      assert.ok('err' in outcome, 'aborted fetch must reject');
+
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      const callsAfterAbort = synthCalls.length;
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      const callsLater = synthCalls.length;
+      assert.equal(
+        callsLater,
+        callsAfterAbort,
+        `server must stop synthesizing after client abort (grew ${callsAfterAbort} -> ${callsLater})`,
+      );
+      assert.ok(
+        callsAfterAbort < 30,
+        `aborted synthesis must not run all 30 segments (ran ${callsAfterAbort})`,
+      );
+
+      const started = performance.now();
+      const followUp = await client.synth('短句。');
+      const elapsed = performance.now() - started;
+      assert.equal(followUp.status, 200);
+      assert.ok(
+        elapsed < 800,
+        `aborted work must not block the shared TTS queue (next request took ${Math.round(elapsed)} ms)`,
+      );
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('interrupts a long single-segment utterance by chunking it into sentences', async () => {
+    const { backend, synthCalls } = createSlowBackend(40);
+    const registry = new SpeechEngineRegistry({
+      backend,
+      resolveBundleDir: async (id) => `/virtual/models/${id}`,
+    });
+    const token = `sk-vmd-${'i'.repeat(48)}`;
+    const server = await startVoiceDaemonServer({ port: 0, token, registry });
+    const client = createClient(token, server.port);
+    try {
+      assert.equal((await client.synth('预热。')).status, 200);
+      synthCalls.length = 0;
+
+      // No emotion tags => one emotion segment, but 30 sentences inside it: the engine must
+      // chunk at sentence boundaries so a mid-request abort can stop after the current sentence.
+      const longText = '取消验证句。'.repeat(30);
+      const ac = new AbortController();
+      const pending = client.synthOutcome(longText, ac.signal);
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      ac.abort(new Error('client interrupted'));
+      const outcome = await pending;
+      assert.ok('err' in outcome, 'aborted fetch must reject (long text must be interruptible)');
+
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      const callsAfterAbort = synthCalls.length;
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      assert.equal(synthCalls.length, callsAfterAbort, 'server must stop synthesizing after client abort');
+      assert.ok(
+        callsAfterAbort < 30,
+        `aborted long-text synthesis must not run all 30 sentence chunks (ran ${callsAfterAbort})`,
+      );
+
+      const followUp = await client.synth('短句。');
+      assert.equal(followUp.status, 200);
+    } finally {
+      await server.close();
+    }
+  });
+});

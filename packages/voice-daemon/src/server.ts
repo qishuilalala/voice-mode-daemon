@@ -369,7 +369,26 @@ async function handleRequest(
       if (typeof parsed.voice === 'string') synthInput.voice = parsed.voice;
       if (typeof parsed.speed === 'number') synthInput.speed = parsed.speed;
 
-      const { wav } = await ctx.registry.synthesizeSpeechWav(synthInput);
+      // Abort long synthesis as soon as the client drops the connection so the shared TTS
+      // instance is released instead of finishing work nobody will receive.
+      const synthAbort = new AbortController();
+      const onResponseClose = (): void => {
+        if (!res.writableEnded) synthAbort.abort();
+      };
+      res.once('close', onResponseClose);
+      let wav: Uint8Array;
+      try {
+        ({ wav } = await ctx.registry.synthesizeSpeechWav({
+          ...synthInput,
+          signal: synthAbort.signal,
+        }));
+      } catch (err) {
+        if (synthAbort.signal.aborted) return;
+        throw err;
+      } finally {
+        res.off('close', onResponseClose);
+      }
+      if (synthAbort.signal.aborted) return;
       if (format === 'pcm') {
         const pcm = extractWavDataChunk(wav);
         res.writeHead(200, {
