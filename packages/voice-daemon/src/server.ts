@@ -520,10 +520,27 @@ async function handleStreamingUpgrade(
 }
 
 async function runStreamingSession(ws: WebSocket, ctx: RequestContext): Promise<void> {
-  let session: Awaited<ReturnType<SpeechEngineRegistry['createStreamingAsrSession']>>;
+  let session: Awaited<ReturnType<SpeechEngineRegistry['createStreamingAsrSession']>> | undefined;
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  let closed = false;
+  const cleanup = (): void => {
+    closed = true;
+    clearTimeout(idleTimer);
+    const stream = session;
+    session = undefined;
+    try {
+      stream?.close();
+    } catch {
+      // Ignore session close errors on teardown.
+    }
+  };
+  ws.once('close', cleanup);
+  ws.on('error', cleanup);
+
   try {
     session = await ctx.registry.createStreamingAsrSession();
   } catch (err) {
+    if (closed || ws.readyState !== ws.OPEN) return;
     sendStreamingJson(ws, {
       ok: false,
       type: 'error',
@@ -533,26 +550,17 @@ async function runStreamingSession(ws: WebSocket, ctx: RequestContext): Promise<
     ws.close(1011, 'asr unavailable');
     return;
   }
+  if (closed || ws.readyState !== ws.OPEN) {
+    cleanup();
+    return;
+  }
+  const stream = session;
 
   sendStreamingJson(ws, { ok: true, type: 'ready', sampleRate: 16_000, format: 'pcm16le' });
 
   let lastPartial = '';
-  let closed = false;
-  const idleTimer = setInterval(() => {
-    if (!closed) {
-      ws.close(1000, 'idle timeout');
-    }
-  }, STREAMING_IDLE_MS);
-
-  const cleanup = (): void => {
-    closed = true;
-    clearInterval(idleTimer);
-    try {
-      session.close();
-    } catch {
-      // Ignore session close errors on teardown.
-    }
-  };
+  const closeOnIdle = () => ws.close(1000, 'idle timeout');
+  idleTimer = setTimeout(closeOnIdle, STREAMING_IDLE_MS);
 
   ws.on('message', (data, isBinary) => {
     if (closed) {
@@ -572,7 +580,7 @@ async function runStreamingSession(ws: WebSocket, ctx: RequestContext): Promise<
         samples[i] = bytes.readInt16LE(i * 2) / 32_768;
       }
       try {
-        session.accept(samples, 16_000);
+        stream.accept(samples, 16_000);
       } catch (err) {
         sendStreamingJson(ws, {
           ok: false,
@@ -584,7 +592,9 @@ async function runStreamingSession(ws: WebSocket, ctx: RequestContext): Promise<
         ws.close(1011, 'decode failed');
         return;
       }
-      const partial = session.partial();
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(closeOnIdle, STREAMING_IDLE_MS);
+      const partial = stream.partial();
       if (partial !== lastPartial) {
         lastPartial = partial;
         sendStreamingJson(ws, { ok: true, type: 'partial', text: partial });
@@ -601,7 +611,7 @@ async function runStreamingSession(ws: WebSocket, ctx: RequestContext): Promise<
     }
     if (control.type === 'stop') {
       try {
-        const final = session.finish();
+        const final = stream.finish();
         sendStreamingJson(ws, {
           ok: true,
           type: 'final',
@@ -620,9 +630,6 @@ async function runStreamingSession(ws: WebSocket, ctx: RequestContext): Promise<
       ws.close(1000, 'done');
     }
   });
-
-  ws.on('close', cleanup);
-  ws.on('error', cleanup);
 }
 
 function sendStreamingJson(ws: WebSocket, payload: Record<string, unknown>): void {

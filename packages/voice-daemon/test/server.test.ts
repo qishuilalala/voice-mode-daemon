@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
 import { describe, it } from 'node:test';
 import WebSocket from 'ws';
 import { DaemonClient, KOKORO_SPEAKERS_103, encodeMonoPcm16Wav } from '@voice-mode/core';
@@ -411,6 +412,96 @@ describe('voice-daemon OpenAI-compatible hardening (D-0013 D+)', () => {
       assert.equal(final?.language, 'zh');
       ws.close();
     } finally {
+      await server.close();
+    }
+  });
+
+  it('keeps receiving audio past one minute and closes after a minute without audio', async (t) => {
+    const { backend } = createDeterministicBackend();
+    const registry = new SpeechEngineRegistry({
+      backend,
+      resolveBundleDir: async (id) => `/virtual/models/${id}`,
+    });
+    const token = `sk-vmd-${'f'.repeat(48)}`;
+    const server = await startVoiceDaemonServer({ port: 0, token, registry });
+    const ws = new WebSocket(`ws://127.0.0.1:${server.port}/v1/audio/transcriptions/stream`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const signal = AbortSignal.timeout(5_000);
+    const closed = once(ws, 'close', { signal });
+    const nextMessageType = () => Promise.race([
+      once(ws, 'message', { signal }).then(([data]) => JSON.parse(data.toString()).type),
+      closed.then(() => 'closed'),
+    ]);
+
+    try {
+      t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+      assert.equal(await nextMessageType(), 'ready');
+
+      t.mock.timers.tick(40_000);
+      ws.send(Buffer.alloc(200));
+      assert.equal(await nextMessageType(), 'partial');
+
+      t.mock.timers.tick(25_000);
+      ws.send(Buffer.alloc(200));
+      assert.equal(await nextMessageType(), 'partial');
+
+      t.mock.timers.tick(60_000);
+      const [code, reason] = await closed;
+      assert.equal(code, 1000);
+      assert.equal(reason.toString(), 'idle timeout');
+    } finally {
+      ws.terminate();
+      await server.close();
+    }
+  });
+
+  // Keep this real close handshake after the virtual-clock test so ws can settle its own timer.
+  it('closes a recognizer stream when the client disconnects during model loading', async () => {
+    const { backend } = createDeterministicBackend();
+    let markLoading!: () => void;
+    let allowLoad!: () => void;
+    const loading = new Promise<void>((resolve) => { markLoading = resolve; });
+    const loadAllowed = new Promise<void>((resolve) => { allowLoad = resolve; });
+    const createRecognizer = backend.createZipformer2Recognizer;
+    let streamClosed = false;
+    backend.createZipformer2Recognizer = async (...args) => {
+      markLoading();
+      await loadAllowed;
+      const recognizer = await createRecognizer(...args);
+      const createStream = recognizer.createStreamingSession;
+      assert.ok(createStream);
+      return {
+        ...recognizer,
+        createStreamingSession() {
+          const stream = createStream();
+          return { ...stream, close() { stream.close(); streamClosed = true; } };
+        },
+      };
+    };
+    const registry = new SpeechEngineRegistry({
+      backend,
+      resolveBundleDir: async (id) => `/virtual/models/${id}`,
+    });
+    const token = `sk-vmd-${'g'.repeat(48)}`;
+    const server = await startVoiceDaemonServer({ port: 0, token, registry });
+    const ws = new WebSocket(`ws://127.0.0.1:${server.port}/v1/audio/transcriptions/stream`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const signal = AbortSignal.timeout(5_000);
+
+    try {
+      await once(ws, 'open', { signal });
+      await loading;
+      const closed = once(ws, 'close', { signal });
+      ws.close();
+      await closed;
+      allowLoad();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.equal(streamClosed, true);
+    } finally {
+      allowLoad();
+      ws.terminate();
       await server.close();
     }
   });

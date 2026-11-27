@@ -94,6 +94,11 @@ for (const [endpoint, live] of checks) {
     if (keysOf(documented.tts?.engines?.[0]).some((key) => !(key in (live.tts?.engines?.[0] ?? {})))) {
       problems.push('/v1/capabilities: tts.engines[0] documented keys not in live response');
     }
+    for (const key of ['maxTtsInputChars', 'maxAsrAudioBytes']) {
+      if (typeof live.limits?.[key] !== 'number' || documented.limits?.[key] !== live.limits[key]) {
+        problems.push(`/v1/capabilities: documented limits.${key} differs from the live response`);
+      }
+    }
   }
   if (endpoint === '/v1/models' && (live.object !== 'list' || !Array.isArray(live.data))) {
     problems.push('/v1/models: expected OpenAI-style object:"list" + data[]');

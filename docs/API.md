@@ -39,7 +39,7 @@ OpenAI 兼容的模型清单（`object: "list"` / `data[]`），供宿主枚举�
   { "id": "kokoro-int8", "object": "model", "owned_by": "voice-daemon",
     "capabilities": ["tts"], "voices": ["zf_xiaobei", "..."] },
   { "id": "zipformer2", "object": "model", "owned_by": "voice-daemon", "capabilities": ["asr"] },
-  { "id": "sensevoice-int8", "object": "model", "owned_by": "voice-daemon", "capabilities": ["asr"] }
+  { "id": "sensevoice", "object": "model", "owned_by": "voice-daemon", "capabilities": ["asr"] }
 ] }
 ```
 
@@ -64,7 +64,7 @@ OpenAI 兼容的模型清单（`object: "list"` / `data[]`），供宿主枚举�
     { "id": "zipformer2", "responseFormats": ["json", "text"] },
     { "id": "sensevoice", "responseFormats": ["json", "text"] }
   ] },
-  "limits": { "maxTtsInputChars": 4000, "maxAsrAudioBytes": 268435456 } }
+  "limits": { "maxTtsInputChars": 8000, "maxAsrAudioBytes": 26214400 } }
 ```
 
 `tts.engines[].expression` 是 `@voice-mode/core` 的 E1 能力契约原样透出（字段以 core 的 `ExpressionCaps` 为准）。
@@ -81,7 +81,7 @@ OpenAI 兼容的模型清单（`object: "list"` / `data[]`），供宿主枚举�
 | `response_format` | `"wav"` \| `"pcm"` | 否 | 默认 `wav`（24 kHz PCM16）；`pcm` 为无头部裸 16-bit LE 样本 |
 
 响应：`200` + `audio/wav`（RIFF，24 kHz）或 `audio/pcm`（`audio/pcm` MIME）。
-错误码（`code`）：`malformed_json`、`missing_input`、`input_too_long`（413）、`unsupported_response_format`、`tts_unavailable`（模型缺失/加载失败）。
+错误码（`code`）：`malformed_json`、`missing_input`、`unsupported_response_format`（400），`input_too_long`、`payload_too_large`（413），`model_not_installed`（503），`internal_error`（500）。
 
 ### POST /v1/audio/transcriptions
 
@@ -90,8 +90,9 @@ OpenAI 兼容的模型清单（`object: "list"` / `data[]`），供宿主枚举�
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `file` | binary | 是 | WAV（PCM16）音频 |
-| `model` | string | 否 | `zipformer2`（流式模型）或 `sensevoice`（定稿重译）；缺省自动选择 |
+| `model` | string | 否 | `zipformer2`（流式模型）或 `sensevoice`（定稿重译，默认） |
 | `language` | string | 否 | 识别语言提示（如 `zh`、`en`；模型支持范围内） |
+| `response_format` | `"json"` \| `"text"` | 否 | 默认 `json`；`text` 返回 `text/plain; charset=utf-8` |
 
 响应：
 
@@ -99,7 +100,7 @@ OpenAI 兼容的模型清单（`object: "list"` / `data[]`），供宿主枚举�
 { "text": "识别结果", "language": "zh", "durationMs": 1234 }
 ```
 
-错误码：`missing_file`、`unsupported_audio`、`asr_unavailable`、`model_not_found`。
+错误码：`invalid_multipart`、`missing_audio`、`malformed_wav`（400），`payload_too_large`（413），`model_not_installed`（503），`internal_error`（500）。
 
 ### WS /v1/audio/transcriptions/stream
 
@@ -115,12 +116,18 @@ WebSocket 流式转写（P1-5，增量 partial + 结束 final）。需 zipformer
   - `{"ok":true,"type":"partial","text":"…"}`（文本变化时推送）
   - `{"ok":true,"type":"final","text":"…","language":"zh"}`
   - `{"ok":false,"type":"error","code":"asr_unavailable|decode_failed|finalize_failed|malformed_control","message":"…"}`
-- 空闲 60 秒自动关闭；每个连接独立识别流。
+- 自 `ready` 起连续 60 秒未接收到可解码的音频帧时自动关闭。每个连接拥有独立的识别流。
 
 ```js
 const ws = new WebSocket(`ws://127.0.0.1:18790/v1/audio/transcriptions/stream?token=${token}`);
-ws.onmessage = (e) => console.log(JSON.parse(e.data));
-ws.onopen = () => { ws.send(pcm16Chunk); ws.send(JSON.stringify({ type: 'stop' })); };
+ws.onmessage = (e) => {
+  const frame = JSON.parse(e.data);
+  console.log(frame);
+  if (frame.type === 'ready') {
+    ws.send(pcm16Chunk);
+    ws.send(JSON.stringify({ type: 'stop' }));
+  }
+};
 ```
 
 完整示例见 [`examples/ws-streaming.mjs`](../examples/ws-streaming.mjs)。
