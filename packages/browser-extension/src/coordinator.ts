@@ -35,6 +35,12 @@ import { message } from './i18n.ts';
 
 export const SPEECH_SYNTHESIS_MIME = 'text/x-speech-synthesis-utf8';
 export const DEFAULT_EXTENSION_PROBE_TIMEOUT_MS = 500;
+/**
+ * Core `DaemonClient` defaults to an 8 s HTTP timeout, but daemon cold-start Kokoro loading is
+ * documented at 20-30 s (docs/API.md §1) and long warm sentences can exceed 8 s on slow machines.
+ * Timed-out TTS silently falls back to the browser voice, so give the extension a visible budget.
+ */
+export const DEFAULT_EXTENSION_DAEMON_TIMEOUT_MS = 30_000;
 
 const UTF8_ENCODER = new TextEncoder();
 const UTF8_DECODER = new TextDecoder('utf-8');
@@ -440,6 +446,7 @@ export class VoiceExtensionCoordinator {
       asrModel: options.asrModel ?? 'zipformer2',
       ...(options.language ? { language: options.language } : {}),
       probeTimeoutMs: options.probeTimeoutMs ?? DEFAULT_EXTENSION_PROBE_TIMEOUT_MS,
+      timeoutMs: DEFAULT_EXTENSION_DAEMON_TIMEOUT_MS,
       cooldownMs: 3_000,
       healthTtlMs: 5_000,
       fetchImpl: boundBrowserFetch,

@@ -342,6 +342,21 @@ describe('MV3 browser-extension coordinator, sender security, 103-voice catalog,
     await byokCoordinator.dispose();
   });
 
+  it('gives daemon TTS/ASR a cold-start-safe timeout budget instead of the core 8 s default', async () => {
+    const coordinator = new VoiceExtensionCoordinator({
+      daemonBaseUrl: 'http://127.0.0.1:18790',
+      daemonToken: `sk-vmd-${'c'.repeat(48)}`,
+    });
+    // DaemonClient stores the effective timeout on its instance; cold Kokoro load is documented
+    // at 20-30 s, so the extension must not keep the core DEFAULT_DAEMON_TIMEOUT_MS of 8000.
+    const daemonClient = (coordinator as unknown as { daemonClient: { timeoutMs: number } }).daemonClient;
+    assert.ok(
+      daemonClient.timeoutMs >= 30_000,
+      `expected daemon TTS timeoutMs >= 30000, got ${daemonClient.timeoutMs}`,
+    );
+    await coordinator.dispose();
+  });
+
   it('injects dictated text with vocabulary replacements into focused web inputs via FocusTextInjector', () => {
     let inputEvents = 0;
     const fakeInput = {

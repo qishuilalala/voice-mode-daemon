@@ -52,6 +52,69 @@ function splitSynthesisChunks(text: string): string[] {
   return chunks.length > 0 ? chunks : [text];
 }
 
+/**
+ * Trailing silence (seconds) that zipformer2 needs to decode the final syllable.
+ * The buffered transcription path has always padded this; the streaming path must too.
+ */
+export const STREAMING_TAIL_PAD_SECONDS = 0.5;
+
+export function tailPadSampleCount(sampleRate: number): number {
+  if (!Number.isFinite(sampleRate) || sampleRate <= 0) return 0;
+  return Math.round(sampleRate * STREAMING_TAIL_PAD_SECONDS);
+}
+
+/** Minimal sherpa-onnx `OnlineStream` surface used by the streaming session factory. */
+export interface StreamingRecognizerStream {
+  acceptWaveform(input: { samples: Float32Array; sampleRate: number }): void;
+  inputFinished(): void;
+}
+
+/** Minimal sherpa-onnx `OnlineRecognizer` surface used by the streaming session factory. */
+export interface StreamingRecognizerLike {
+  createStream(): StreamingRecognizerStream;
+  isReady(stream: StreamingRecognizerStream): boolean;
+  decode(stream: StreamingRecognizerStream): void;
+  getResult(stream: StreamingRecognizerStream): { text?: string };
+}
+
+/**
+ * Streaming ASR session over a sherpa-onnx online recognizer. Mirrors the buffered path before
+ * finalizing: append {@link STREAMING_TAIL_PAD_SECONDS} of silence so the sentence tail is decoded
+ * instead of truncated.
+ */
+export function createStreamingAsrSession(
+  recognizer: StreamingRecognizerLike,
+  defaultSampleRate = 16_000,
+): StreamingAsrSession {
+  const stream = recognizer.createStream();
+  let sampleRate = defaultSampleRate;
+  const decodeAvailable = (): string => {
+    while (recognizer.isReady(stream)) {
+      recognizer.decode(stream);
+    }
+    return (recognizer.getResult(stream).text ?? '').trim();
+  };
+  return {
+    accept(samples: Float32Array, rate: number) {
+      if (Number.isFinite(rate) && rate > 0) sampleRate = rate;
+      stream.acceptWaveform({ samples, sampleRate: rate });
+      decodeAvailable();
+    },
+    partial() {
+      return (recognizer.getResult(stream).text ?? '').trim();
+    },
+    finish() {
+      const padSamples = tailPadSampleCount(sampleRate);
+      if (padSamples > 0) {
+        stream.acceptWaveform({ samples: new Float32Array(padSamples), sampleRate });
+      }
+      stream.inputFinished();
+      return { text: decodeAvailable(), language: 'zh' };
+    },
+    close() {},
+  };
+}
+
 export function resolveKokoroSpeakerId(voice: string | undefined): number {
   if (typeof voice !== 'string') return DEFAULT_KOKORO_SID;
   const trimmed = voice.trim();
@@ -184,7 +247,7 @@ export function createSherpaNodeBackend(): NativeSpeechBackend {
       };
       return {
         async transcribe(samples: Float32Array, sampleRate: number) {
-          const tailPad = Math.round(sampleRate * 0.5);
+          const tailPad = tailPadSampleCount(sampleRate);
           const padded = new Float32Array(samples.length + tailPad);
           padded.set(samples, 0);
           const stream = recognizer.createStream();
@@ -194,23 +257,7 @@ export function createSherpaNodeBackend(): NativeSpeechBackend {
           return { text, language: 'zh' };
         },
         createStreamingSession() {
-          const stream = recognizer.createStream();
-          return {
-            accept(samples: Float32Array, sampleRate: number) {
-              stream.acceptWaveform({ samples, sampleRate });
-              decodeAvailable(stream);
-            },
-            partial() {
-              const res = recognizer.getResult(stream);
-              return (res.text ?? '').trim();
-            },
-            finish() {
-              stream.inputFinished();
-              const text = decodeAvailable(stream);
-              return { text, language: 'zh' };
-            },
-            close() {},
-          };
+          return createStreamingAsrSession(recognizer);
         },
       };
     },

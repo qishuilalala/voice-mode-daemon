@@ -9,6 +9,7 @@
 - Host 校验：拒绝非回环 `Host`（防 DNS rebinding）；`Origin` 白名单：`app://obsidian.md`、`chrome-extension://*`、`moz-extension://*`、`http://127.0.0.1:*`、`http://localhost:*`。
 - CORS：白名单 Origin 回显、`OPTIONS` 预检放行；无凭据跨域被拒。
 - 错误体统一为：`{ "error": { "message": string, "type": string, "code": string } }`（`type` 见各端点）。
+- 客户端超时预算：模型冷加载（首次请求）约 **20–30 s**，暖机长句在低配机也可能超过 8 s；`@voice-mode/core` 的 `DaemonClient` 默认 `timeoutMs = 8000` 偏小，TTS 超时会静默回退宿主语音。扩展侧显式使用 **30 s**（`DEFAULT_EXTENSION_DAEMON_TIMEOUT_MS`），其他宿主建议同样放宽。
 
 ## 2. 端点
 
@@ -111,11 +112,12 @@ WebSocket 流式转写（P1-5，增量 partial + 结束 final）。需 zipformer
 - 客户端 → 服务端：
   - binary 帧：mono **PCM16 LE @ 16 kHz**（建议每帧 100–500 ms）
   - text 帧：`{"type":"stop"}` → 返回 final 并关闭
+  - `ready` 之前（首次冷加载模型期间）发送的 binary/text 帧会被服务端**按到达顺序缓冲**，`ready` 后按序回放，无需等待 ready 再发送；缓冲上限 **256 帧 / 1 MiB**（任一超限 fail-fast：回 `{"ok":false,"type":"error","code":"preready_buffer_overflow","message":"…"}` 并以 close code `1009` 断开）。连接断开时缓冲丢弃；模型加载失败回 `asr_unavailable` 并以 `1011` 关闭。
 - 服务端 → 客户端（JSON 文本帧）：
   - `{"ok":true,"type":"ready","sampleRate":16000,"format":"pcm16le"}`
   - `{"ok":true,"type":"partial","text":"…"}`（文本变化时推送）
-  - `{"ok":true,"type":"final","text":"…","language":"zh"}`
-  - `{"ok":false,"type":"error","code":"asr_unavailable|decode_failed|finalize_failed|malformed_control","message":"…"}`
+  - `{"ok":true,"type":"final","text":"…","language":"zh"}`：finalize 前服务端自动追加约 **0.5 s 静音**（与 buffered `/v1/audio/transcriptions` 的 tailPad 一致）以补齐 zipformer2 尾部上下文，客户端**无需**自行补静音
+  - `{"ok":false,"type":"error","code":"asr_unavailable|decode_failed|finalize_failed|malformed_control|preready_buffer_overflow","message":"…"}`
 - 自 `ready` 起连续 60 秒未接收到可解码的音频帧时自动关闭。每个连接拥有独立的识别流。
 
 ```js

@@ -12,6 +12,7 @@ import {
   startVoiceDaemonServer,
   type NativeSpeechBackend,
 } from '../dist/index.js';
+import { createStreamingAsrSession } from '../dist/engine-registry.js';
 
 function createDeterministicBackend() {
   const loadCounts = { kokoro: 0, zipformer2: 0, sensevoice: 0 };
@@ -643,5 +644,171 @@ describe('voice-daemon HTTP TTS cancellation (real client abort)', () => {
     } finally {
       await server.close();
     }
+  });
+});
+
+describe('voice-daemon WS streaming cold start (frames before ready)', () => {
+  function createGatedBackend() {
+    const { backend } = createDeterministicBackend();
+    let markLoading!: () => void;
+    let allowLoad!: () => void;
+    const loading = new Promise<void>((resolve) => {
+      markLoading = resolve;
+    });
+    const loadAllowed = new Promise<void>((resolve) => {
+      allowLoad = resolve;
+    });
+    const createRecognizer = backend.createZipformer2Recognizer.bind(backend);
+    backend.createZipformer2Recognizer = async (...args) => {
+      markLoading();
+      await loadAllowed;
+      return createRecognizer(...args);
+    };
+    return { backend, loading, allowLoad };
+  }
+
+  async function openStream(port: number, token: string): Promise<WebSocket> {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/v1/audio/transcriptions/stream`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    await once(ws, 'open', { signal: AbortSignal.timeout(5_000) });
+    return ws;
+  }
+
+  function trackFrames(ws: WebSocket): {
+    messages: Array<Record<string, unknown>>;
+    waitFor: (type: string, timeoutMs?: number) => Promise<Record<string, unknown>>;
+  } {
+    const messages: Array<Record<string, unknown>> = [];
+    ws.on('message', (data, isBinary) => {
+      if (!isBinary) messages.push(JSON.parse(data.toString()) as Record<string, unknown>);
+    });
+    const waitFor = async (type: string, timeoutMs = 5_000) => {
+      const started = Date.now();
+      while (!messages.some((m) => m.type === type)) {
+        if (Date.now() - started > timeoutMs) {
+          throw new Error(`timed out waiting for "${type}"; got [${messages.map((m) => String(m.type)).join(',')}]`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      return messages.find((m) => m.type === type)!;
+    };
+    return { messages, waitFor };
+  }
+
+  it('buffers audio and stop frames sent before ready and flushes them in order', async () => {
+    const { backend, loading, allowLoad } = createGatedBackend();
+    const registry = new SpeechEngineRegistry({
+      backend,
+      resolveBundleDir: async (id) => `/virtual/models/${id}`,
+    });
+    const token = `sk-vmd-${'k'.repeat(48)}`;
+    const server = await startVoiceDaemonServer({ port: 0, token, registry });
+    let ws: WebSocket | undefined;
+    try {
+      ws = await openStream(server.port, token);
+      const { messages, waitFor } = trackFrames(ws);
+      // Cold recognizer load is gated: the client sends its whole session before "ready".
+      ws.send(Buffer.alloc(200));
+      ws.send(Buffer.alloc(200));
+      ws.send(JSON.stringify({ type: 'stop' }));
+      await loading;
+      // Let the pre-ready frames actually reach the server socket while it is still loading;
+      // the gate makes this deterministic instead of depending on event-loop ordering.
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      allowLoad();
+
+      await waitFor('ready');
+      const final = await waitFor('final');
+      assert.equal(final.text, 'zipformer-final:200');
+      assert.equal(messages[0]?.type, 'ready', 'first server frame must be ready');
+      assert.equal(messages.at(-1)?.type, 'final', 'final must be the last frame');
+      assert.equal(
+        messages.some((m) => m.type === 'error'),
+        false,
+        `no error frames expected; got ${JSON.stringify(messages)}`,
+      );
+    } finally {
+      allowLoad();
+      ws?.terminate();
+      await server.close();
+    }
+  });
+
+  it('rejects frames before ready beyond the bounded buffer with a structured error', async () => {
+    const { backend, loading, allowLoad } = createGatedBackend();
+    const registry = new SpeechEngineRegistry({
+      backend,
+      resolveBundleDir: async (id) => `/virtual/models/${id}`,
+    });
+    const token = `sk-vmd-${'l'.repeat(48)}`;
+    const server = await startVoiceDaemonServer({ port: 0, token, registry });
+    let ws: WebSocket | undefined;
+    try {
+      ws = await openStream(server.port, token);
+      const closedOutcome = once(ws, 'close', { signal: AbortSignal.timeout(5_000) }).then(
+        ([code]) => ({ code: code as number }),
+        (err: unknown) => ({ err }),
+      );
+      const { waitFor } = trackFrames(ws);
+      // 17 x 64 KiB = 1.06 MiB, above the 1 MiB pre-ready bound; grows while the model is loading.
+      for (let i = 0; i < 17; i += 1) {
+        ws.send(Buffer.alloc(64 * 1024));
+      }
+      await loading;
+      const error = await waitFor('error');
+      assert.equal(error.code, 'preready_buffer_overflow');
+      assert.equal(typeof error.message, 'string');
+      const outcome = await closedOutcome;
+      assert.ok('code' in outcome, `expected close frame, got ${String('err' in outcome ? outcome.err : 'unknown')}`);
+      assert.equal(outcome.code, 1009);
+    } finally {
+      allowLoad();
+      ws?.terminate();
+      await server.close();
+    }
+  });
+});
+
+describe('voice-daemon streaming ASR tail padding (buffered-path parity)', () => {
+  it('accepts 0.5 s of trailing silence before finalizing a streaming session', () => {
+    const accepted: Array<{ samples: Float32Array; sampleRate: number }> = [];
+    let finished = false;
+    const recognizer = {
+      createStream() {
+        return {
+          acceptWaveform(input: { samples: Float32Array; sampleRate: number }) {
+            accepted.push(input);
+          },
+          inputFinished() {
+            finished = true;
+          },
+        };
+      },
+      isReady() {
+        return false;
+      },
+      decode() {},
+      getResult() {
+        return {
+          text: finished
+            ? `final:${accepted.reduce((sum, chunk) => sum + chunk.samples.length, 0)}`
+            : 'partial',
+        };
+      },
+    };
+
+    const session = createStreamingAsrSession(recognizer);
+    session.accept(new Float32Array(1_600), 16_000);
+    assert.equal(session.partial(), 'partial');
+
+    const result = session.finish();
+    assert.equal(accepted.length, 2, 'finish() must append exactly one silence chunk');
+    const pad = accepted[1];
+    assert.equal(pad?.samples.length, 8_000, 'tail pad must be 0.5 s at 16 kHz');
+    assert.equal(pad?.sampleRate, 16_000);
+    assert.equal(pad?.samples.some((value) => value !== 0), false, 'tail pad must be silence');
+    assert.equal(result.text, 'final:9600');
+    assert.equal(result.language, 'zh');
   });
 });

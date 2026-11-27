@@ -487,6 +487,11 @@ async function handleRequest(
 
 const STREAMING_PATH = '/v1/audio/transcriptions/stream';
 const STREAMING_IDLE_MS = 60_000;
+// Frames sent while the recognizer loads are buffered and replayed after `ready`; bound the buffer
+// so a client that floods the socket before ready is failed fast instead of growing memory.
+const STREAMING_PREREADY_MAX_BYTES = 1_048_576;
+const STREAMING_PREREADY_MAX_FRAMES = 256;
+const STREAMING_OVERFLOW_CLOSE_CODE = 1009;
 
 function rejectUpgrade(socket: Duplex, status: number, message: string): void {
   const body = message.replace(/[\r\n]/g, ' ');
@@ -538,13 +543,30 @@ async function handleStreamingUpgrade(
   });
 }
 
+interface BufferedStreamingFrame {
+  data: Buffer;
+  isBinary: boolean;
+}
+
 async function runStreamingSession(ws: WebSocket, ctx: RequestContext): Promise<void> {
   let session: Awaited<ReturnType<SpeechEngineRegistry['createStreamingAsrSession']>> | undefined;
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
   let closed = false;
+  let ready = false;
+  let lastPartial = '';
+  const preReadyFrames: BufferedStreamingFrame[] = [];
+  let preReadyBytes = 0;
+
+  const clearPreReadyFrames = (): void => {
+    preReadyFrames.length = 0;
+    preReadyBytes = 0;
+  };
+
   const cleanup = (): void => {
     closed = true;
+    ready = false;
     clearTimeout(idleTimer);
+    clearPreReadyFrames();
     const stream = session;
     session = undefined;
     try {
@@ -556,47 +578,19 @@ async function runStreamingSession(ws: WebSocket, ctx: RequestContext): Promise<
   ws.once('close', cleanup);
   ws.on('error', cleanup);
 
-  try {
-    session = await ctx.registry.createStreamingAsrSession();
-  } catch (err) {
-    if (closed || ws.readyState !== ws.OPEN) return;
-    sendStreamingJson(ws, {
-      ok: false,
-      type: 'error',
-      message: err instanceof Error ? err.message : 'streaming ASR unavailable',
-      code: 'asr_unavailable',
-    });
-    ws.close(1011, 'asr unavailable');
-    return;
-  }
-  if (closed || ws.readyState !== ws.OPEN) {
-    cleanup();
-    return;
-  }
-  const stream = session;
+  const closeOnIdle = (): void => ws.close(1000, 'idle timeout');
 
-  sendStreamingJson(ws, { ok: true, type: 'ready', sampleRate: 16_000, format: 'pcm16le' });
-
-  let lastPartial = '';
-  const closeOnIdle = () => ws.close(1000, 'idle timeout');
-  idleTimer = setTimeout(closeOnIdle, STREAMING_IDLE_MS);
-
-  ws.on('message', (data, isBinary) => {
-    if (closed) {
-      return;
-    }
+  // Process one frame once the recognizer exists (warm sessions and replayed pre-ready frames).
+  const processReadyFrame = (data: Buffer, isBinary: boolean): void => {
+    const stream = session;
+    if (closed || !stream) return;
     if (isBinary) {
-      const bytes = Buffer.isBuffer(data)
-        ? data
-        : Array.isArray(data)
-          ? Buffer.concat(data)
-          : Buffer.from(data as ArrayBuffer);
-      if (bytes.byteLength < 2) {
+      if (data.byteLength < 2) {
         return;
       }
-      const samples = new Float32Array(Math.floor(bytes.byteLength / 2));
+      const samples = new Float32Array(Math.floor(data.byteLength / 2));
       for (let i = 0; i < samples.length; i += 1) {
-        samples[i] = bytes.readInt16LE(i * 2) / 32_768;
+        samples[i] = data.readInt16LE(i * 2) / 32_768;
       }
       try {
         stream.accept(samples, 16_000);
@@ -648,7 +642,72 @@ async function runStreamingSession(ws: WebSocket, ctx: RequestContext): Promise<
       cleanup();
       ws.close(1000, 'done');
     }
+  };
+
+  // Register the listener immediately: frames sent during the cold model load would otherwise be
+  // dropped by `ws` (no listener yet) and the client would hang until the idle timeout.
+  ws.on('message', (data, isBinary) => {
+    if (closed) {
+      return;
+    }
+    const raw = Buffer.isBuffer(data)
+      ? data
+      : Array.isArray(data)
+        ? Buffer.concat(data)
+        : Buffer.from(data as ArrayBuffer);
+    if (ready) {
+      processReadyFrame(raw, isBinary);
+      return;
+    }
+    if (
+      preReadyFrames.length >= STREAMING_PREREADY_MAX_FRAMES ||
+      preReadyBytes + raw.byteLength > STREAMING_PREREADY_MAX_BYTES
+    ) {
+      sendStreamingJson(ws, {
+        ok: false,
+        type: 'error',
+        message: `Too many frames before ready: limit ${STREAMING_PREREADY_MAX_FRAMES} frames / ${STREAMING_PREREADY_MAX_BYTES} bytes`,
+        code: 'preready_buffer_overflow',
+      });
+      cleanup();
+      ws.close(STREAMING_OVERFLOW_CLOSE_CODE, 'preready buffer overflow');
+      return;
+    }
+    preReadyFrames.push({ data: raw, isBinary });
+    preReadyBytes += raw.byteLength;
   });
+
+  try {
+    session = await ctx.registry.createStreamingAsrSession();
+  } catch (err) {
+    if (closed || ws.readyState !== ws.OPEN) return;
+    sendStreamingJson(ws, {
+      ok: false,
+      type: 'error',
+      message: err instanceof Error ? err.message : 'streaming ASR unavailable',
+      code: 'asr_unavailable',
+    });
+    cleanup();
+    ws.close(1011, 'asr unavailable');
+    return;
+  }
+  if (closed || ws.readyState !== ws.OPEN) {
+    cleanup();
+    return;
+  }
+
+  sendStreamingJson(ws, { ok: true, type: 'ready', sampleRate: 16_000, format: 'pcm16le' });
+  ready = true;
+  idleTimer = setTimeout(closeOnIdle, STREAMING_IDLE_MS);
+
+  // Replay buffered frames in arrival order; audio then `stop` finalizes exactly like a warm session.
+  while (preReadyFrames.length > 0 && !closed) {
+    const frame = preReadyFrames.shift();
+    if (!frame) break;
+    preReadyBytes -= frame.data.byteLength;
+    processReadyFrame(frame.data, frame.isBinary);
+  }
+  clearPreReadyFrames();
 }
 
 function sendStreamingJson(ws: WebSocket, payload: Record<string, unknown>): void {
