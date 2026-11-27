@@ -487,8 +487,10 @@ async function handleRequest(
 
 const STREAMING_PATH = '/v1/audio/transcriptions/stream';
 const STREAMING_IDLE_MS = 60_000;
-// Frames sent while the recognizer loads are buffered and replayed after `ready`; bound the buffer
-// so a client that floods the socket before ready is failed fast instead of growing memory.
+// Pre-ready frames that reach the event loop are buffered and replayed after `ready`; bound the
+// buffer so a client that floods the socket is failed fast only when the buffer actually grows.
+// Caveat: a synchronous native recognizer construction blocks the event loop for seconds, so frames
+// sent during the cold load are read after `ready` and the buffer stays empty (bound unreachable there).
 const STREAMING_PREREADY_MAX_BYTES = 1_048_576;
 const STREAMING_PREREADY_MAX_FRAMES = 256;
 const STREAMING_OVERFLOW_CLOSE_CODE = 1009;
@@ -644,8 +646,10 @@ async function runStreamingSession(ws: WebSocket, ctx: RequestContext): Promise<
     }
   };
 
-  // Register the listener immediately: frames sent during the cold model load would otherwise be
-  // dropped by `ws` (no listener yet) and the client would hang until the idle timeout.
+  // Register the listener immediately: frames the event loop can deliver before `ready` (async load
+  // or otherwise yielding event loop) are buffered instead of being dropped by `ws`, and a disconnect
+  // during the load is observed at once. A synchronous native load blocks the event loop, so frames
+  // sent meanwhile are read after `ready` as normal (warm-path) frames instead.
   ws.on('message', (data, isBinary) => {
     if (closed) {
       return;

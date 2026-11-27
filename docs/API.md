@@ -112,7 +112,7 @@ WebSocket 流式转写（P1-5，增量 partial + 结束 final）。需 zipformer
 - 客户端 → 服务端：
   - binary 帧：mono **PCM16 LE @ 16 kHz**（建议每帧 100–500 ms）
   - text 帧：`{"type":"stop"}` → 返回 final 并关闭
-  - `ready` 之前（首次冷加载模型期间）发送的 binary/text 帧会被服务端**按到达顺序缓冲**，`ready` 后按序回放，无需等待 ready 再发送；缓冲上限 **256 帧 / 1 MiB**（任一超限 fail-fast：回 `{"ok":false,"type":"error","code":"preready_buffer_overflow","message":"…"}` 并以 close code `1009` 断开）。连接断开时缓冲丢弃；模型加载失败回 `asr_unavailable` 并以 `1011` 关闭。
+  - `ready` 之前（首次冷加载模型期间）发送的 binary/text 帧**可能**被服务端按到达顺序缓冲，`ready` 后按序回放，无需等待 ready 再发送。**有界缓冲与超限 fail-fast 仅适用于 `ready` 前事件循环仍能处理帧的路径**（异步加载、事件循环可让出时，例如并发连接共享同一加载）：上限 **256 帧 / 1 MiB**；缓冲实际增长且任一上限被超过时，回 `{"ok":false,"type":"error","code":"preready_buffer_overflow","message":"…"}` 并以 close code `1009` 断开。**同步原生加载是例外**：zipformer2 首次加载的 `OnlineRecognizer` 同步构造会占用事件循环数秒，期间 socket 帧不会被读取、也不会进入缓冲，`ready` 后才作为普通帧处理；因此该上限在纯同步加载路径下不可达（不会触发 `preready_buffer_overflow`）。连接断开时缓冲丢弃；模型加载失败回 `asr_unavailable` 并以 `1011` 关闭。
 - 服务端 → 客户端（JSON 文本帧）：
   - `{"ok":true,"type":"ready","sampleRate":16000,"format":"pcm16le"}`
   - `{"ok":true,"type":"partial","text":"…"}`（文本变化时推送）
